@@ -1,0 +1,35 @@
+# OuterView news job: every 15 minutes, read GDELT's newest files and publish per-region story files on the
+# `data` branch (rewritten each run so the repository stays small). Data: GDELT Project. Headline and link only.
+name: news
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: news
+  cancel-in-progress: false
+jobs:
+  tiles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the current data branch
+        run: |
+          git clone --depth 1 --branch data "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" out || mkdir -p out
+          mkdir -p out/tiles
+      - name: Build the tiles
+        run: python3 -I gkg.py out/tiles
+      - name: Publish the data branch
+        working-directory: out
+        run: |
+          git init -q
+          git checkout -q --orphan fresh
+          git config user.name "outerview-news"
+          git config user.email "news@outerview.pages.dev"
+          cp ../DATA-README.md README.md
+          git add -A
+          git commit -q -m "tiles $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" fresh:data
