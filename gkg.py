@@ -7,6 +7,7 @@ last 24 hours of stories. Headline and link only, never the article text. Data: 
 
 Usage: python3 gkg.py <out_dir>   (merges into the files already in out_dir)
 """
+import html
 import io
 import json
 import os
@@ -79,6 +80,7 @@ def save_state(out_dir, state):
 
 
 def tidy(s):
+    s = html.unescape(s)
     s = re.sub(r'\s+', ' ', s).strip()
     s = re.sub(r'\s+([,.;:!?)\]])', r'\1', s)
     return s
