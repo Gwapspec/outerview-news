@@ -224,7 +224,7 @@ def main(out_dir):
 
     # Tiles not touched this run still age: drop stories older than the window.
     for name in os.listdir(out_dir):
-        if not name.endswith('.json') or name[:-5] in by_tile or name in ('state.json', 'index.json'):
+        if not name.endswith('.json') or name[:-5] in by_tile or name in ('state.json', 'index.json', 'top.json'):
             continue
         path = os.path.join(out_dir, name)
         try:
@@ -240,10 +240,35 @@ def main(out_dir):
         except Exception:  # noqa: BLE001
             pass
 
+    # The world right now: the stories most outlets carried in the last 24 hours, across every tile, with images.
+    top = []
+    for name in os.listdir(out_dir):
+        if not name.endswith('.json') or name in ('state.json', 'index.json', 'top.json'):
+            continue
+        try:
+            with open(os.path.join(out_dir, name), encoding='utf-8') as f:
+                for s in json.load(f).get('s', []):
+                    if s.get('n', 1) >= 3:
+                        top.append(s)
+        except Exception:  # noqa: BLE001
+            pass
+    seen_titles = set()
+    ranked = []
+    for s in sorted(top, key=lambda s: (s.get('n', 1), s['ts']), reverse=True):
+        key = re.sub(r'[^a-z0-9]+', ' ', s['t'].lower()).strip()[:60]
+        if key in seen_titles:
+            continue
+        seen_titles.add(key)
+        ranked.append(s)
+        if len(ranked) >= 60:
+            break
+    with open(os.path.join(out_dir, 'top.json'), 'w', encoding='utf-8') as f:
+        json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'source': 'GDELT', 's': ranked}, f, ensure_ascii=False, separators=(',', ':'))
+
     with open(os.path.join(out_dir, 'index.json'), 'w', encoding='utf-8') as f:
-        tiles = sorted(n[:-5] for n in os.listdir(out_dir) if n.endswith('.json') and n != 'index.json')
+        tiles = sorted(n[:-5] for n in os.listdir(out_dir) if n.endswith('.json') and n not in ('index.json', 'state.json', 'top.json'))
         json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'tiles': tiles, 'source': 'GDELT Project', 'license': 'cite GDELT; headline and link only'}, f)
-    print('tiles written:', written)
+    print('tiles written:', written, '| top stories:', len(ranked))
 
 
 if __name__ == '__main__':
