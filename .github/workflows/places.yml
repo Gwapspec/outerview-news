@@ -1,0 +1,28 @@
+name: places
+on:
+  schedule:
+    - cron: '20 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      cities:
+        description: 'cities this run'
+        default: '40'
+permissions:
+  contents: write
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q overturemaps
+      - run: python3 -I places/seed.py ${{ github.event.inputs.cities || '40' }}
+      - name: Commit
+        run: |
+          git config user.name outerview-places
+          git config user.email places@outerview.world
+          git add places/data
+          git diff --cached --quiet && echo "no change" || (git commit -q -m "places $(date -u +%F)" && git pull -q --rebase && git push -q)
