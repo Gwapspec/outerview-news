@@ -31,7 +31,8 @@ jobs:
       - name: Alert run (web push for watched places)
         env:
           PUSH_RUN_TOKEN: ${{ secrets.PUSH_RUN_TOKEN }}
-        run: if [ -n "$PUSH_RUN_TOKEN" ]; then curl -s -m 60 -X POST https://outerview.world/api/push/run -H "Authorization: Bearer $PUSH_RUN_TOKEN"; echo; fi
+        run: |
+          if [ -n "$PUSH_RUN_TOKEN" ]; then curl -s -m 60 -X POST https://outerview.world/api/push/run -H "Authorization: Bearer $PUSH_RUN_TOKEN"; echo; fi
         continue-on-error: true
       - name: Publish the data branch
         working-directory: out

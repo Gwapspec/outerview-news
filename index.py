@@ -4,7 +4,7 @@
 Usage: python3 -I index.py <tiles_dir> <cities.json>
 
 Reads every story tile written by gkg.py, keeps the stories of the last 24 hours, assigns each one to the nearest
-city of 150,000 people or more within 60 km, and writes <tiles_dir>/index.json: every city with at least one story,
+city of 150,000 people or more within 60 km, and writes <tiles_dir>/outer-index.json: every city with at least one story,
 ranked. The score is 0 to 100 on a log scale against the loudest city of the day, so it reads the same way every
 day: 100 is the loudest place on Earth right now, 50 is a city with roughly the square root of that attention.
 Weight = stories + half the extra outlets (a story carried by 8 outlets counts more than one carried by 1).
@@ -49,7 +49,7 @@ def main(tiles_dir, cities_path):
     seen = 0
     for path in glob.glob(os.path.join(tiles_dir, '*.json')):
         name = os.path.basename(path)
-        if name in ('index.json', 'launches.json', 'top.json'):
+        if name in ('index.json', 'outer-index.json', 'launches.json', 'top.json', 'state.json'):
             continue
         try:
             with open(path) as f:
@@ -92,7 +92,7 @@ def main(tiles_dir, cities_path):
         'placed': seen,
         'cities': rows,
     }
-    with open(os.path.join(tiles_dir, 'index.json'), 'w') as f:
+    with open(os.path.join(tiles_dir, 'outer-index.json'), 'w') as f:
         json.dump(out, f, separators=(',', ':'), ensure_ascii=False)
     print(f'index: {len(rows)} cities, {seen} stories placed, loudest {rows[0]["name"] if rows else "none"}')
 
