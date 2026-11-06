@@ -224,7 +224,7 @@ def main(out_dir):
 
     # Tiles not touched this run still age: drop stories older than the window.
     for name in os.listdir(out_dir):
-        if not name.endswith('.json') or name[:-5] in by_tile or name in ('state.json', 'index.json', 'top.json'):
+        if not name.endswith('.json') or name[:-5] in by_tile or name in ('state.json', 'index.json', 'top.json', 'launches.json'):
             continue
         path = os.path.join(out_dir, name)
         try:
@@ -243,7 +243,7 @@ def main(out_dir):
     # The world right now: the stories most outlets carried in the last 24 hours, across every tile, with images.
     top = []
     for name in os.listdir(out_dir):
-        if not name.endswith('.json') or name in ('state.json', 'index.json', 'top.json'):
+        if not name.endswith('.json') or name in ('state.json', 'index.json', 'top.json', 'launches.json'):
             continue
         try:
             with open(os.path.join(out_dir, name), encoding='utf-8') as f:

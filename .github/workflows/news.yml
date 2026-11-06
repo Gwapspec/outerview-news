@@ -22,6 +22,9 @@ jobs:
           mkdir -p out/tiles
       - name: Build the tiles
         run: python3 -I gkg.py out/tiles
+      - name: Upcoming launches (The Space Devs, at most once an hour)
+        run: python3 -I launches.py out/tiles
+        continue-on-error: true
       - name: Publish the data branch
         working-directory: out
         run: |
