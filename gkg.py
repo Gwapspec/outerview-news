@@ -266,7 +266,7 @@ def main(out_dir):
         json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'source': 'GDELT', 's': ranked}, f, ensure_ascii=False, separators=(',', ':'))
 
     with open(os.path.join(out_dir, 'index.json'), 'w', encoding='utf-8') as f:
-        tiles = sorted(n[:-5] for n in os.listdir(out_dir) if n.endswith('.json') and n not in ('index.json', 'state.json', 'top.json'))
+        tiles = sorted(n[:-5] for n in os.listdir(out_dir) if n.endswith('.json') and n not in ('index.json', 'state.json', 'top.json', 'launches.json'))
         json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'tiles': tiles, 'source': 'GDELT Project', 'license': 'cite GDELT; headline and link only'}, f)
     print('tiles written:', written, '| top stories:', len(ranked))
 
