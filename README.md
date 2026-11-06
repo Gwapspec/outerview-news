@@ -1,6 +1,12 @@
 # outerview-news
 
-The news job for [OuterView](https://outerview.pages.dev), a globe that shows what is happening in any place.
+[![The Outer Index today](https://outerview.world/api/outer-index/badge.svg)](https://outerview.world/outer-index)
+
+The news job for [OuterView](https://outerview.world), a globe that shows what is happening in any place. It also
+builds [the Outer Index](https://outerview.world/outer-index), one number per city for how loud the world is there
+today (`index.py`, `tiles/outer-index.json`, the day-by-day `tiles/outer-index-history.json`, CC BY 4.0, as a
+[feed](https://outerview.world/outer-index/feed.xml), a [badge](https://outerview.world/api/outer-index/badge.svg?city=fr/paris) and an
+[embed box](https://outerview.world/embed/outer-index)).
 
 Every 15 minutes a GitHub Actions workflow reads the newest [GDELT](https://www.gdeltproject.org) GKG files
 (English and translated), keeps each story's headline, outlet, link, language, image and first city-level
