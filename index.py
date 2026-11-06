@@ -7,7 +7,10 @@ Reads every story tile written by gkg.py, keeps the stories of the last 24 hours
 city of 150,000 people or more within 60 km, and writes <tiles_dir>/outer-index.json: every city with at least one story,
 ranked. The score is 0 to 100 on a log scale against the loudest city of the day, so it reads the same way every
 day: 100 is the loudest place on Earth right now, 50 is a city with roughly the square root of that attention.
-Weight = stories + half the extra outlets (a story carried by 8 outlets counts more than one carried by 1).
+Weight = stories + half the extra outlets (a story carried by 8 outlets counts more than one carried by 1). A story
+whose place name does not mention the city counts 0.6 (GDELT sometimes places a story at a country's centroid,
+and the nearest mid-size city would otherwise take the credit). outer-index-history.json keeps each city's score
+for the last 14 days, so a page can say "up 12 since yesterday".
 No AI, no opinion: counts of placed headlines from the GDELT Project, nothing else.
 """
 import glob
@@ -69,15 +72,17 @@ def main(tiles_dir, cities_path):
             seen += 1
             n = int(s.get('n') or 1)
             a = acc.setdefault(c[0], {'id': c[0], 'name': c[1], 'cc': c[2], 'lat': c[3], 'lng': c[4], 'stories': 0, 'outlets': 0, 'top': None})
+            pl = str(s.get('pl', '')).lower()
+            cname = c[1].lower()
+            match = 1.0 if (cname in pl or pl.split(',')[0].strip() in cname) else 0.6
             a['stories'] += 1
             a['outlets'] += n
+            a['w'] = a.get('w', 0.0) + match * (1 + 0.5 * max(0, n - 1))
             top = a['top']
             if top is None or n > top['n'] or (n == top['n'] and str(s.get('ts', '')) > top['ts']):
                 a['top'] = {'t': str(s.get('t', ''))[:120], 'u': s.get('u', ''), 'd': s.get('d', ''), 'n': n, 'ts': str(s.get('ts', ''))}
 
     rows = list(acc.values())
-    for a in rows:
-        a['w'] = a['stories'] + 0.5 * max(0, a['outlets'] - a['stories'])
     max_w = max([a['w'] for a in rows] + [1.0])
     for a in rows:
         a['score'] = int(round(100 * math.log1p(a['w']) / math.log1p(max_w)))
@@ -85,6 +90,24 @@ def main(tiles_dir, cities_path):
     rows.sort(key=lambda a: (-a['score'], -a['stories'], a['name']))
     for i, a in enumerate(rows):
         a['rank'] = i + 1
+
+    # History: today's score per city, kept 14 days, and yesterday's delta on each row.
+    hist_path = os.path.join(tiles_dir, 'outer-index-history.json')
+    try:
+        with open(hist_path) as f:
+            hist = json.load(f)
+    except Exception:
+        hist = {'days': {}}
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    hist['days'][today] = {a['id']: a['score'] for a in rows}
+    keep = sorted(hist['days'].keys())[-14:]
+    hist['days'] = {d: hist['days'][d] for d in keep}
+    prev_days = [d for d in keep if d < today]
+    prev = hist['days'][prev_days[-1]] if prev_days else {}
+    for a in rows:
+        a['delta'] = (a['score'] - prev[a['id']]) if a['id'] in prev else None
+    with open(hist_path, 'w') as f:
+        json.dump(hist, f, separators=(',', ':'))
     out = {
         'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         'hours': HOURS,
