@@ -32,3 +32,11 @@ jobs:
         run: |
           if [ -z "$PUSH_RUN_TOKEN" ]; then echo "no token, the site imports on first view"; exit 0; fi
           for i in $(seq 1 150); do r=$(curl -s -m 90 -X POST https://outerview.world/api/places/import -H "Authorization: Bearer $PUSH_RUN_TOKEN"); echo "$r"; case "$r" in *'"left":0'*|''|*error*) break;; esac; done
+      # Keep going while cities are left (the 6-hour cron is only the backstop; GitHub throttles crons).
+      - name: Continue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          left=$(python3 -c "import json; q=json.load(open('places/queue.json')); i=json.load(open('places/data/index.json')); print(sum(1 for c in q if c['id'] not in i))")
+          echo "$left cities left"
+          if [ "$left" -gt 0 ] && [ "${{ vars.PLACES_LOOP }}" != "off" ]; then gh workflow run places.yml --ref main -f cities=400; fi

@@ -7,6 +7,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  issues: write
 concurrency:
   group: news
   cancel-in-progress: false
@@ -48,6 +49,18 @@ jobs:
       # GitHub runs a */15 cron only a few times a day when it is busy (2026-11-07: gaps of 5 to 8 hours), so the
       # job keeps its own clock: it waits 13 minutes and starts the next run itself. The cron is the backstop that
       # restarts the chain if a run fails. Set the repository variable NEWS_LOOP to "off" to stop it.
+      # The site check (smoke.sh, a copy of world-view/scripts/smoke.sh): every tick, one self-closing issue here.
+      - name: Check the site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if bash smoke.sh | tee smoke.txt; then
+            n=$(gh issue list --state open --search "Site check failed in:title" --json number --jq '.[0].number'); [ -n "$n" ] && gh issue close "$n" --comment "Green again at $(date -u +'%Y-%m-%d %H:%M') UTC." || true
+          else
+            n=$(gh issue list --state open --search "Site check failed in:title" --json number --jq '.[0].number')
+            body=$(printf 'Checked %s UTC.\n\n```\n%s\n```' "$(date -u +'%Y-%m-%d %H:%M')" "$(grep -E '^FAIL' smoke.txt)")
+            if [ -z "$n" ]; then gh issue create --title "Site check failed" --body "$body"; else gh issue comment "$n" --body "$body"; fi
+          fi
       - name: Keep the clock
         if: ${{ vars.NEWS_LOOP != 'off' }}
         env:
