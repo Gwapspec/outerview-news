@@ -29,6 +29,8 @@ check /city/fr/paris/feed.xml    200 '<feed xmlns'
 check /es/city/es/madrid/feed.xml 200 'xml:lang="es"'
 check /llms.txt                  200 '# OuterView'
 check /ja/city/jp/tokyo/here     200 'watch=1'
+check /api/airports?near=48.86,2.35 200 'CDG'
+check /api/airports?iata=NRT      200 'Narita'
 # The news job must have run in the last 90 minutes (it runs every 15).
 upd=$(curl -s -m 25 "$BASE/api/outer-index" | python3 -c "import json,sys,datetime; d=json.load(sys.stdin); t=datetime.datetime.fromisoformat(d['updated'].replace('Z','+00:00')); print(int((datetime.datetime.now(datetime.timezone.utc)-t).total_seconds()//60))" 2>/dev/null || echo 9999)
 if [ "$upd" -gt 90 ]; then echo "FAIL news job: the index is $upd minutes old"; fail=1; else echo "ok   news job ran $upd min ago"; fi
