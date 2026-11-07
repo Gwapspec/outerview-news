@@ -13,7 +13,7 @@ permissions:
 jobs:
   seed:
     runs-on: ubuntu-latest
-    timeout-minutes: 110
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,7 +21,10 @@ jobs:
           python-version: '3.12'
       - run: pip install -q overturemaps
       - run: python3 -I places/seed.py ${{ github.event.inputs.cities || '400' }}
+        env:
+          SEED_MINUTES: '40'
       - name: Commit
+        if: always()
         run: |
           git config user.name outerview-places
           git config user.email places@outerview.world
