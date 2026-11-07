@@ -13,7 +13,7 @@ concurrency:
 jobs:
   tiles:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Fetch the current data branch
@@ -45,3 +45,11 @@ jobs:
           git add -A
           git commit -q -m "tiles $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" fresh:data
+      # GitHub runs a */15 cron only a few times a day when it is busy (2026-11-07: gaps of 5 to 8 hours), so the
+      # job keeps its own clock: it waits 13 minutes and starts the next run itself. The cron is the backstop that
+      # restarts the chain if a run fails. Set the repository variable NEWS_LOOP to "off" to stop it.
+      - name: Keep the clock
+        if: ${{ vars.NEWS_LOOP != 'off' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sleep 780 && gh workflow run news.yml --ref main
