@@ -9,6 +9,7 @@ on:
         default: '400'
 permissions:
   contents: write
+  actions: write
 jobs:
   seed:
     runs-on: ubuntu-latest
