@@ -6,7 +6,7 @@ on:
     inputs:
       cities:
         description: 'cities this run'
-        default: '40'
+        default: '400'
 permissions:
   contents: write
 jobs:
@@ -19,10 +19,16 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -q overturemaps
-      - run: python3 -I places/seed.py ${{ github.event.inputs.cities || '40' }}
+      - run: python3 -I places/seed.py ${{ github.event.inputs.cities || '400' }}
       - name: Commit
         run: |
           git config user.name outerview-places
           git config user.email places@outerview.world
           git add places/data
           git diff --cached --quiet && echo "no change" || (git commit -q -m "places $(date -u +%F)" && git pull -q --rebase && git push -q)
+      - name: Import into the database
+        env:
+          PUSH_RUN_TOKEN: ${{ secrets.PUSH_RUN_TOKEN }}
+        run: |
+          if [ -z "$PUSH_RUN_TOKEN" ]; then echo "no token, the site imports on first view"; exit 0; fi
+          for i in $(seq 1 150); do r=$(curl -s -m 90 -X POST https://outerview.world/api/places/import -H "Authorization: Bearer $PUSH_RUN_TOKEN"); echo "$r"; case "$r" in *'"left":0'*|''|*error*) break;; esac; done

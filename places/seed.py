@@ -13,7 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 queue = json.load(open(os.path.join(HERE, "queue.json")))
 idx_path = os.path.join(HERE, "data", "index.json")
 index = json.load(open(idx_path)) if os.path.exists(idx_path) else {}
-todo = [c for c in queue if c["id"] not in index][:N]
+stale = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 7 * 86400))
+todo = [c for c in queue if c["id"] not in index or (index[c["id"]].get("fail") and index[c["id"]]["updated"] < stale)][:N]
 print(f"{len(index)} done, {len(todo)} this run, {len(queue) - len(index)} left", flush=True)
 for c in todo:
     pop = c.get("population") or 0
@@ -29,6 +30,8 @@ for c in todo:
     if dl.returncode != 0 or flt.returncode != 0:
         print(f"FAIL {c['id']} dl={dl.returncode} filter={flt.returncode} {flt.stderr[-200:]}", flush=True)
         os.remove(out + ".tmp")
+        index[c["id"]] = {"n": 0, "updated": time.strftime("%Y-%m-%d"), "fail": 1}
+        json.dump(index, open(idx_path, "w"), sort_keys=True)
         continue
     os.replace(out + ".tmp", out)
     n = sum(1 for _ in open(out))
