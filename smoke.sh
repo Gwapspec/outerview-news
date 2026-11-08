@@ -34,6 +34,8 @@ check /api/airports?iata=NRT      200 'Narita'
 check /city/fr/paris/stay        200 'booking.com'
 check /ja/city/jp/tokyo/fly      200 'HND'
 check /es/city/es/madrid/do      200 'hacer en Madrid'
+check /country/fr                200 'right now'
+check /de/country/jp             200 'Japan jetzt'
 # The app shell canary (docs/BLUEPRINT.md, section D): the home page must reference a main script that answers 200
 # and is the real app (the hub's class name is in it), so a broken bundle fails the smoke and the uptime job.
 main=$(curl -s -m 25 "$BASE/" | grep -o 'src="/assets/index-[A-Za-z0-9_-]*\.js"' | head -1 | sed 's/src="//;s/"$//')
