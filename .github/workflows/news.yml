@@ -66,4 +66,17 @@ jobs:
         if: ${{ vars.NEWS_LOOP != 'off' }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: sleep 780 && gh workflow run news.yml --ref main
+        # Hand off to the next run and make sure it started: on 2026-11-09 at 18:14 GitHub dropped a dispatched run
+        # (it failed with no jobs) and the chain stopped for two hours. A dropped or missing run is asked for again,
+        # up to three times. Only runs created after the hand-off count.
+        run: |
+          sleep 780
+          for try in 1 2 3; do
+            since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            gh workflow run news.yml --ref main || true
+            sleep 45
+            next=$(gh run list --workflow news.yml --limit 5 --json status,conclusion,createdAt --jq "map(select(.createdAt >= \"$since\")) | (.[0] // {}) | (.status // \"none\") + \" \" + (.conclusion // \"\")")
+            echo "try $try: the next run is $next"
+            case "$next" in none*|"completed failure"*|"completed startup_failure"*|"completed cancelled"*) sleep 15 ;; *) exit 0 ;; esac
+          done
+          echo "::warning::the next news run did not start after three tries; the 15-minute schedule will pick it up"
