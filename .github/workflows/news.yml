@@ -47,6 +47,15 @@ jobs:
           git add -A
           git commit -q -m "tiles $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" fresh:data
+      # GitHub switches off the schedule of a public repository after 60 days with no activity, and it is not
+      # written down whether this job's own pushes to the data branch count. So the job re-enables its own
+      # workflow on every run: the 60 days start again, and the cron backstop below never goes away.
+      - name: Keep the schedule alive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X PUT "repos/${{ github.repository }}/actions/workflows/news.yml/enable" && echo "schedule enabled"
+        continue-on-error: true
       # GitHub runs a */15 cron only a few times a day when it is busy (2026-11-07: gaps of 5 to 8 hours), so the
       # job keeps its own clock: it waits 13 minutes and starts the next run itself. The cron is the backstop that
       # restarts the chain if a run fails. Set the repository variable NEWS_LOOP to "off" to stop it.
