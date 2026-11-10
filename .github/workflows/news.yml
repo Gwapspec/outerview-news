@@ -47,6 +47,11 @@ jobs:
           git add -A
           git commit -q -m "tiles $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" fresh:data
+      # Sentry's cron monitor "news-clock" (free, one is included): each run that published says so. If no word
+      # comes for 35 minutes, Sentry opens an issue and emails. It watches from outside GitHub (checkin.py).
+      - name: Tell Sentry the news went out
+        run: python3 -I checkin.py
+        continue-on-error: true
       # GitHub switches off the schedule of a public repository after 60 days with no activity, and it is not
       # written down whether this job's own pushes to the data branch count. So the job re-enables its own
       # workflow on every run: the 60 days start again, and the cron backstop below never goes away.
