@@ -52,7 +52,7 @@ def main(tiles_dir, cities_path):
     seen = 0
     for path in glob.glob(os.path.join(tiles_dir, '*.json')):
         name = os.path.basename(path)
-        if name in ('index.json', 'outer-index.json', 'launches.json', 'top.json', 'state.json'):
+        if name in ('index.json', 'outer-index.json', 'launches.json', 'top.json', 'state.json', 'money.json'):
             continue
         try:
             with open(path) as f:

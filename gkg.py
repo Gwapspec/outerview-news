@@ -27,6 +27,27 @@ MAX_PER_TILE = 500
 TITLE_RE = re.compile(r'<PAGE_TITLE>(.*?)</PAGE_TITLE>', re.S)
 LANG_RE = re.compile(r'srclc:([a-z]{3})')
 BAD_TITLE = re.compile(r'^(home|news|untitled|404|403|page not found|access denied)\b', re.I)
+# Money news (money.json): GDELT marks each document with themes. One theme alone is noise (a crime story that
+# names a bank), so a story counts as money news when its themes fall in two or more of these groups and at least
+# one of them is a market group. Tested on live files 2026-11-11: about 1 story in 44.
+MONEY = {
+    'ECON_STOCKMARKET': 'mkt', 'ECON_IPO': 'mkt', 'ECON_EARNINGSREPORT': 'mkt',
+    'ECON_INTEREST_RATES': 'rate', 'ECON_CENTRALBANK': 'rate', 'EPU_POLICY_CENTRAL_BANK': 'rate', 'WB_1235_CENTRAL_BANKS': 'rate',
+    'ECON_INFLATION': 'infl', 'ECON_COST_OF_LIVING': 'infl',
+    'ECON_HOUSING_PRICES': 'home',
+    'ECON_DEBT': 'debt', 'ECON_BANKRUPTCY': 'debt',
+    'ECON_BITCOIN': 'coin', 'ECON_GOLDPRICE': 'gold', 'ECON_CURRENCY_EXCHANGE_RATE': 'fx', 'ECON_OILPRICE': 'oil',
+}
+MONEY_CORE = {'mkt', 'rate', 'infl', 'fx', 'coin', 'gold'}
+MONEY_PER_COUNTRY = 40
+MONEY_MAX = 1500
+NOT_TILES = ('state.json', 'index.json', 'top.json', 'launches.json', 'money.json')
+
+
+def money_groups(themes):
+    """V1Themes (THEME;THEME;...) to the sorted money groups, or [] when the story is not money news."""
+    g = {MONEY[t] for t in themes.split(';') if t in MONEY}
+    return sorted(g) if len(g) >= 2 and g & MONEY_CORE else []
 
 
 def fetch(url, tries=3):
@@ -138,7 +159,7 @@ def parse(zip_bytes, default_lang):
                     tone = round(float(tone), 1)
                 except ValueError:
                     tone = None
-                out.append({
+                row = {
                     'u': cols[4],
                     'd': cols[3],
                     't': title[:160],
@@ -151,8 +172,57 @@ def parse(zip_bytes, default_lang):
                     'lg': lang,
                     'im': cols[18][:300] if cols[18] else '',
                     'tn': tone,
-                })
+                }
+                groups = money_groups(cols[7])
+                if groups:
+                    row['mg'] = groups
+                out.append(row)
     return out
+
+
+def write_money(out_dir, stories, cutoff):
+    """money.json: the last 24 hours of money news for the whole world, newest first, one row per headline, at
+    most MONEY_PER_COUNTRY per country. Merges this run's stories into the file already there."""
+    path = os.path.join(out_dir, 'money.json')
+    old = []
+    try:
+        with open(path, encoding='utf-8') as f:
+            old = json.load(f).get('s', [])
+    except Exception:  # noqa: BLE001
+        old = []
+    fresh = [dict(s) for s in stories if s.get('mg')]  # copies: the tile rows keep their own outlet counts
+    for s in fresh:
+        s.pop('n', None)
+        s.pop('ds', None)
+    seen_url = set()
+    by_title = {}
+    merged = []
+    for s in old + fresh:  # old first, so a headline keeps the count it already has
+        if s['ts'] < cutoff or s['u'] in seen_url:
+            continue
+        seen_url.add(s['u'])
+        key = re.sub(r'[^a-z0-9]+', ' ', s['t'].lower()).strip()[:70] or s['t'][:70]
+        if key in by_title:
+            first = by_title[key]
+            outlets = first.setdefault('ds', [first['d']])
+            if s['d'] not in outlets:
+                first['n'] = first.get('n', 1) + 1
+                if len(outlets) < 6:
+                    outlets.append(s['d'])
+            continue
+        by_title[key] = s
+        merged.append(s)
+    merged.sort(key=lambda s: s['ts'], reverse=True)
+    per = {}
+    kept = []
+    for s in merged:
+        per[s['cc']] = per.get(s['cc'], 0) + 1
+        if per[s['cc']] <= MONEY_PER_COUNTRY:
+            kept.append(s)
+    kept = kept[:MONEY_MAX]
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'source': 'GDELT', 's': kept}, f, ensure_ascii=False, separators=(',', ':'))
+    return len(kept), len(per)
 
 
 def main(out_dir):
@@ -224,7 +294,7 @@ def main(out_dir):
 
     # Tiles not touched this run still age: drop stories older than the window.
     for name in os.listdir(out_dir):
-        if not name.endswith('.json') or name[:-5] in by_tile or name in ('state.json', 'index.json', 'top.json', 'launches.json'):
+        if not name.endswith('.json') or name[:-5] in by_tile or name in NOT_TILES:
             continue
         path = os.path.join(out_dir, name)
         try:
@@ -243,7 +313,7 @@ def main(out_dir):
     # The world right now: the stories most outlets carried in the last 24 hours, across every tile, with images.
     top = []
     for name in os.listdir(out_dir):
-        if not name.endswith('.json') or name in ('state.json', 'index.json', 'top.json', 'launches.json'):
+        if not name.endswith('.json') or name in NOT_TILES:
             continue
         try:
             with open(os.path.join(out_dir, name), encoding='utf-8') as f:
@@ -266,9 +336,14 @@ def main(out_dir):
         json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'source': 'GDELT', 's': ranked}, f, ensure_ascii=False, separators=(',', ':'))
 
     with open(os.path.join(out_dir, 'index.json'), 'w', encoding='utf-8') as f:
-        tiles = sorted(n[:-5] for n in os.listdir(out_dir) if n.endswith('.json') and n not in ('index.json', 'state.json', 'top.json', 'launches.json'))
+        tiles = sorted(n[:-5] for n in os.listdir(out_dir) if n.endswith('.json') and n not in NOT_TILES)
         json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'tiles': tiles, 'source': 'GDELT Project', 'license': 'cite GDELT; headline and link only'}, f)
     print('tiles written:', written, '| top stories:', len(ranked))
+    try:
+        rows, countries = write_money(out_dir, stories, cutoff)
+        print('money stories:', rows, '| countries:', countries)
+    except Exception as e:  # noqa: BLE001  (money news is extra: the tiles above are already written)
+        print('money.json not written:', e)
 
 
 if __name__ == '__main__':
