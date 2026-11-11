@@ -128,6 +128,17 @@ def best_location(field):
     return first
 
 
+def main_country(field):
+    """The country a document names most often (V2Locations lists every mention). A tie goes to the one named
+    first. Money news uses this, not the first city: a story about the Fed that opens in Seoul is American news."""
+    count = {}
+    for loc in field.split(';'):
+        p = loc.split('#')
+        if len(p) >= 7 and p[2]:
+            count[p[2]] = count.get(p[2], 0) + 1  # dicts keep the order of first mention
+    return max(count, key=count.get) if count else ''
+
+
 def tile_of(lat, lng):
     return f'{int(lat // 10) * 10}_{int(lng // 10) * 10}'
 
@@ -176,6 +187,7 @@ def parse(zip_bytes, default_lang):
                 groups = money_groups(cols[7])
                 if groups:
                     row['mg'] = groups
+                    row['mc'] = main_country(cols[10]) or loc['cc']
                 out.append(row)
     return out
 
@@ -198,7 +210,7 @@ def write_money(out_dir, stories, cutoff):
     by_title = {}
     merged = []
     for s in old + fresh:  # old first, so a headline keeps the count it already has
-        if s['ts'] < cutoff or s['u'] in seen_url:
+        if s['ts'] < cutoff or s['u'] in seen_url or 'mc' not in s:  # a row from before 'mc' existed is not kept
             continue
         seen_url.add(s['u'])
         key = re.sub(r'[^a-z0-9]+', ' ', s['t'].lower()).strip()[:70] or s['t'][:70]
@@ -216,8 +228,9 @@ def write_money(out_dir, stories, cutoff):
     per = {}
     kept = []
     for s in merged:
-        per[s['cc']] = per.get(s['cc'], 0) + 1
-        if per[s['cc']] <= MONEY_PER_COUNTRY:
+        c = s.get('mc') or s['cc']
+        per[c] = per.get(c, 0) + 1
+        if per[c] <= MONEY_PER_COUNTRY:
             kept.append(s)
     kept = kept[:MONEY_MAX]
     with open(path, 'w', encoding='utf-8') as f:
