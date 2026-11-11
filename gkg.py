@@ -68,8 +68,22 @@ POL_EARLY = 700
 POL_SHARE = 0.05
 POL_PER_COUNTRY = 40  # half of them the stories most outlets carry, half the newest
 POL_MAX = 1500
-POL_OUTLETS = 40  # outlets named per story, each with its own link (the app lists them: one story, every outlet)
-NOT_TILES = ('state.json', 'index.json', 'top.json', 'launches.json', 'money.json', 'politics.json')
+# One story, every outlet: a row carried by several outlets names up to OUTLETS of them (ds), each with its own
+# link (us, in the same order) and the country it is based in (dc, in the same order, '' when not known).
+OUTLETS = 40
+# Where an outlet is based comes from GDELT's own list of news sites by country (May 2018), trimmed to site and
+# country code in outlet-countries.tsv. It is GDELT's estimate, from the places each site wrote about most; it is
+# from 2018 and it can be wrong. A site that is not on the list has no country, and neither has a site on a shared
+# host: the list knows where the host is, not who writes there.
+OUTLET_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'outlet-countries.tsv')
+SHARED_HOSTS = {
+    'wordpress.com', 'blogspot.com', 'medium.com', 'substack.com', 'tumblr.com', 'typepad.com', 'weebly.com', 'wixsite.com',
+    'github.io', 'google.com', 'facebook.com', 'youtube.com', 'yahoo.com', 'msn.com',
+}
+_outlets = None
+# Files in the tiles folder that are not tiles. The Outer Index's two files belong here: without them the tile
+# ageing below removed them on every run (they have no stories), so the index never kept a second day.
+NOT_TILES = ('state.json', 'index.json', 'top.json', 'launches.json', 'money.json', 'politics.json', 'outer-index.json', 'outer-index-history.json')
 
 
 def money_groups(themes):
@@ -99,6 +113,96 @@ def politics_groups(themes, marks):
             core += 1
             early = early or int(offset) < POL_EARLY
     return sorted(g) if early and core >= POL_SHARE * total else []
+
+
+def title_key(t):
+    """One headline, one key: lower case, the letters and digits of every script, the first 70 characters."""
+    return re.sub(r'[\W_]+', ' ', t.lower()).strip()[:70] or t[:70]
+
+
+def unmerge_once(out_dir, state):
+    """Until 2026-11-11 the headline key kept Latin letters and digits only, so headlines in other scripts were
+    merged with each other (every Arabic headline in a tile could become one "story" with a hundred outlets).
+    Rows merged that way go back to their own outlet, once; state.json remembers it was done."""
+    if state.get('unmerged'):
+        return
+    fixed = 0
+    for name in os.listdir(out_dir):
+        if not name.endswith('.json') or name in ('state.json', 'index.json', 'top.json', 'launches.json', 'outer-index.json', 'outer-index-history.json'):
+            continue
+        path = os.path.join(out_dir, name)
+        try:
+            with open(path, encoding='utf-8') as f:
+                d = json.load(f)
+            changed = 0
+            for s in d.get('s', []):
+                latin = re.sub(r'[^a-z0-9]+', ' ', s['t'].lower()).strip()
+                if 'ds' in s and len(latin) * 2 < len(title_key(s['t'])):
+                    for k in ('n', 'ds', 'us', 'dc'):
+                        s.pop(k, None)
+                    changed += 1
+            if changed:
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(d, f, ensure_ascii=False, separators=(',', ':'))
+                fixed += changed
+        except Exception as e:  # noqa: BLE001
+            print('unmerge skipped', name, e)
+    state['unmerged'] = True
+    print('rows unmerged (old headline key):', fixed)
+
+
+def outlet_country(domain):
+    """GDELT's country code for a news site, '' when it is not on the list. A subdomain takes its parent's."""
+    global _outlets
+    if _outlets is None:
+        _outlets = {}
+        try:
+            with open(OUTLET_FILE, encoding='utf-8') as f:
+                for line in f:
+                    p = line.rstrip('\n').split('\t')
+                    if len(p) == 2 and not line.startswith('#'):
+                        _outlets[p[0]] = p[1]
+        except OSError as e:
+            print('no outlet list, so no outlet countries:', e)
+    d = (domain or '').strip().lower()
+    if d.startswith('www.'):
+        d = d[4:]
+    parts = d.split('.')
+    for i in range(0, max(1, len(parts) - 1)):
+        name = '.'.join(parts[i:])
+        if name in SHARED_HOSTS:
+            return ''
+        if name in _outlets:
+            return _outlets[name]
+    return ''
+
+
+def carry(first, s):
+    """The same headline from another outlet: the first row lists it. n counts outlets, not copies."""
+    names = first.setdefault('ds', [first['d']])
+    urls = first.setdefault('us', [first['u']])
+    urls += [''] * (len(names) - len(urls))  # a row from before links were kept: those outlets have no link
+    if s['d'] in names:
+        return
+    first['n'] = first.get('n', 1) + 1
+    if len(names) < OUTLETS:
+        names.append(s['d'])
+        urls.append(s['u'])
+
+
+def finish(rows):
+    """Before a file is written: each outlet's country (dc, left off when none is known), links in step with names."""
+    for s in rows:
+        names = s.get('ds') or [s['d']]
+        if 'ds' in s:
+            urls = s.get('us') or [s['u']]
+            s['us'] = (urls + [''] * len(names))[:len(names)]
+        codes = [outlet_country(d) for d in names]
+        if any(codes):
+            s['dc'] = codes
+        else:
+            s.pop('dc', None)
+    return rows
 
 
 def fetch(url, tries=3):
@@ -247,12 +351,12 @@ def parse(zip_bytes, default_lang):
     return out
 
 
-def write_topic(out_dir, stories, cutoff, name, mark, per_country, total, outlets=6, covered=False, links=False):
+def write_topic(out_dir, stories, cutoff, name, mark, per_country, total, covered=False):
     """A topic file (money.json, politics.json): the last 24 hours of one topic for the whole world, newest first,
     one row per headline with the outlets that carried it, at most per_country per country. `mark` is the row key
     that says a story belongs (mg, pg). With `covered`, half of a country's rows are the stories most outlets
-    carry and half are its newest; without it they are all its newest. With `links`, a row carried by several
-    outlets also lists each outlet's own address (us, in the order of ds). Merges this run into the file there."""
+    carry and half are its newest; without it they are all its newest. A row carried by several outlets lists them
+    with each one's own link and country (ds, us, dc). Merges this run into the file there."""
     path = os.path.join(out_dir, name)
     old = []
     try:
@@ -262,9 +366,8 @@ def write_topic(out_dir, stories, cutoff, name, mark, per_country, total, outlet
         old = []
     fresh = [dict(s) for s in stories if s.get(mark)]  # copies: the tile rows keep their own outlet counts
     for s in fresh:
-        s.pop('n', None)
-        s.pop('ds', None)
-        s.pop('us', None)
+        for k in ('n', 'ds', 'us', 'dc'):
+            s.pop(k, None)
     seen_url = set()
     by_title = {}
     merged = []
@@ -272,17 +375,9 @@ def write_topic(out_dir, stories, cutoff, name, mark, per_country, total, outlet
         if s['ts'] < cutoff or s['u'] in seen_url or 'mc' not in s:  # a row from before 'mc' existed is not kept
             continue
         seen_url.add(s['u'])
-        key = re.sub(r'[^a-z0-9]+', ' ', s['t'].lower()).strip()[:70] or s['t'][:70]
+        key = title_key(s['t'])
         if key in by_title:
-            first = by_title[key]
-            names = first.setdefault('ds', [first['d']])
-            urls = first.setdefault('us', [first['u']]) if links else None
-            if s['d'] not in names:
-                first['n'] = first.get('n', 1) + 1
-                if len(names) < outlets:
-                    names.append(s['d'])
-                    if links:
-                        urls.append(s['u'])
+            carry(by_title[key], s)
             continue
         by_title[key] = s
         merged.append(s)
@@ -307,7 +402,7 @@ def write_topic(out_dir, stories, cutoff, name, mark, per_country, total, outlet
         kept = sorted(kept, key=most if covered else newest, reverse=True)[:total]
     kept.sort(key=newest, reverse=True)
     with open(path, 'w', encoding='utf-8') as f:
-        json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'source': 'GDELT', 's': kept}, f, ensure_ascii=False, separators=(',', ':'))
+        json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'source': 'GDELT', 's': finish(kept)}, f, ensure_ascii=False, separators=(',', ':'))
     return len(kept), len(by_country)
 
 
@@ -318,12 +413,13 @@ def write_money(out_dir, stories, cutoff):
 
 def write_politics(out_dir, stories, cutoff):
     """politics.json: for each country its most carried stories and its newest, at most POL_PER_COUNTRY."""
-    return write_topic(out_dir, stories, cutoff, 'politics.json', 'pg', POL_PER_COUNTRY, POL_MAX, outlets=POL_OUTLETS, covered=True, links=True)
+    return write_topic(out_dir, stories, cutoff, 'politics.json', 'pg', POL_PER_COUNTRY, POL_MAX, covered=True)
 
 
 def main(out_dir):
     os.makedirs(out_dir, exist_ok=True)
     state = load_state(out_dir)
+    unmerge_once(out_dir, state)
     done = set(state['done'])
     stories = []
     files = 0
@@ -368,24 +464,20 @@ def main(out_dir):
         seen_url = set()
         by_title = {}
         merged = []
-        for s in fresh + old:
+        for s in old + fresh:  # old first, so a headline keeps the outlets it already has
             if s['ts'] < cutoff or s['u'] in seen_url:
                 continue
             seen_url.add(s['u'])
-            key = re.sub(r'[^a-z0-9]+', ' ', s['t'].lower()).strip()[:70]
+            key = title_key(s['t'])
             if key in by_title:
-                first = by_title[key]
-                outlets = first.setdefault('ds', [first['d']])
-                if s['d'] not in outlets and len(outlets) < 6:
-                    outlets.append(s['d'])
-                first['n'] = first.get('n', 1) + 1
+                carry(by_title[key], s)
                 continue
             by_title[key] = s
             merged.append(s)
         merged.sort(key=lambda s: (s.get('n', 1) > 1, s['ts']), reverse=True)
         merged = merged[:MAX_PER_TILE]
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump({'tile': tile, 'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'source': 'GDELT', 's': merged}, f, ensure_ascii=False, separators=(',', ':'))
+            json.dump({'tile': tile, 'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'source': 'GDELT', 's': finish(merged)}, f, ensure_ascii=False, separators=(',', ':'))
         written += 1
 
     # Tiles not touched this run still age: drop stories older than the window.
@@ -421,7 +513,7 @@ def main(out_dir):
     seen_titles = set()
     ranked = []
     for s in sorted(top, key=lambda s: (s.get('n', 1), s['ts']), reverse=True):
-        key = re.sub(r'[^a-z0-9]+', ' ', s['t'].lower()).strip()[:60]
+        key = title_key(s['t'])[:60]
         if key in seen_titles:
             continue
         seen_titles.add(key)
@@ -429,7 +521,7 @@ def main(out_dir):
         if len(ranked) >= 60:
             break
     with open(os.path.join(out_dir, 'top.json'), 'w', encoding='utf-8') as f:
-        json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'source': 'GDELT', 's': ranked}, f, ensure_ascii=False, separators=(',', ':'))
+        json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'source': 'GDELT', 's': finish(ranked)}, f, ensure_ascii=False, separators=(',', ':'))
 
     with open(os.path.join(out_dir, 'index.json'), 'w', encoding='utf-8') as f:
         tiles = sorted(n[:-5] for n in os.listdir(out_dir) if n.endswith('.json') and n not in NOT_TILES)

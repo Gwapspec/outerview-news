@@ -6,3 +6,7 @@ Project (cite GDELT). Used by https://outerview.world.
 
 `tiles/money.json` and `tiles/politics.json` hold the last 24 hours of money news and politics news for the whole
 world, chosen by GDELT's topic marks (the rules are in the `main` branch's README). Nobody picks the stories.
+
+A story several outlets carried is one row that lists them: `ds` the outlets, `us` each one's own link, `dc` the
+country each is based in. The countries come from the GDELT Project's list of news outlets by country (May 2018);
+they are GDELT's estimate and can be wrong, and an outlet that is not on the list has none.

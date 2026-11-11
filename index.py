@@ -52,7 +52,9 @@ def main(tiles_dir, cities_path):
     seen = 0
     for path in glob.glob(os.path.join(tiles_dir, '*.json')):
         name = os.path.basename(path)
-        if name in ('index.json', 'outer-index.json', 'launches.json', 'top.json', 'state.json', 'money.json'):
+        # Only the tiles count. The topic files repeat stories the tiles already hold (politics.json was read
+        # here until 2026-11-11, so a politics story counted twice).
+        if name in ('index.json', 'outer-index.json', 'outer-index-history.json', 'launches.json', 'top.json', 'state.json', 'money.json', 'politics.json'):
             continue
         try:
             with open(path) as f:
