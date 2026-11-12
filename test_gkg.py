@@ -67,4 +67,15 @@ ok(n == 2 and set(idx) == {'FR', 'GM'} and idx['GM'] == {'deu': 1}, 'the index l
 ok(idx['FR'] == {'fra': 14} and total == 15, 'the index counts a story once across the three lists (12 top, of which one is in politics, plus 2)')
 os.makedirs(os.path.join(c, 'x'), exist_ok=True)
 ok(sorted(n_ for n_ in os.listdir(c) if n_.endswith('.json') and n_ not in g.NOT_TILES) == ['40_0.json'], 'the country folder is not taken for a tile')
+# a country's own outlets first
+h = tempfile.mkdtemp()
+json.dump({'s': [row('https://bbc.co.uk/royal', 'A prince speaks about French wildlife at an awards night', mc='FR', n=33, lg='eng'),
+                 row('https://lemonde.fr/calais', 'Calais un salarie meurt apres une chute dans un entrepot', mc='FR', n=9),
+                 row('https://a.fr/x', 'Une histoire sans pays connu pour son site', mc='FR', n=20),
+                 row('https://nytimes.com/p', 'Paris court rules on the pension reform appeal', mc='FR', n=3, lg='eng', ds=['nytimes.com', 'lemonde.fr'])]},
+          open(os.path.join(h, '40_0.json'), 'w', encoding='utf-8'))
+g.write_countries(h, '20500101000000')
+top = [s['u'] for s in json.load(open(os.path.join(h, 'country', 'FR.json'), encoding='utf-8'))['top']]
+ok(top == ['https://lemonde.fr/calais', 'https://nytimes.com/p', 'https://bbc.co.uk/royal', 'https://a.fr/x'], "top: stories an outlet based in the country carries come first, then the most carried")
+ok(g.home_carried({'d': 'lemonde.fr'}, 'FR') and not g.home_carried({'d': 'bbc.co.uk'}, 'FR') and not g.home_carried({'d': 'a.fr'}, 'FR'), 'home: by the outlet list; an outlet not on it has no country')
 print('all good')

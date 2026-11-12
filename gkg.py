@@ -428,9 +428,18 @@ def at_home(s):
     return bool(CC_RE.match(cc)) and (s.get('mc') or cc) == cc
 
 
+def home_carried(s, cc):
+    """Does an outlet based in the country carry the story? GDELT files a story under every place it names, so a
+    British story that says "French" once lands in France. A country's top stories put its own outlets' first.
+    An outlet the 2018 list does not know has no country and does not count."""
+    return any(outlet_country(d) == cc for d in (s.get('ds') or [s['d']]))
+
+
 def write_countries(out_dir, cutoff):
     """country/<cc>.json for every country with news at home in the last day (cc is GDELT's FIPS code):
-    'top' = its COUNTRY_TOP most carried stories from every tile (the newest first among equals), 'politics' and
+    'top' = COUNTRY_TOP stories from every tile: those an outlet based in the country carries first, then the most
+    carried (the newest first among equals), so a story only outlets abroad carry never pushes one of the country's
+    own out. With no home outlet on the list the order is the most carried, as before. 'politics' and
     'money' = its rows of politics.json and money.json. One small file per country, so a country page reads a few
     kilobytes and not three whole-world files. country/index.json counts each country's stories by language, so
     the site map can list only the pages that have something to read. Files of countries that went quiet go."""
@@ -461,7 +470,7 @@ def write_countries(out_dir, cutoff):
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     counts = {}
     for cc in sorted(set(best) | set(topics)):
-        top = sorted(best.get(cc, {}).values(), key=most, reverse=True)[:COUNTRY_TOP]
+        top = sorted(best.get(cc, {}).values(), key=lambda s: (home_carried(s, cc),) + most(s), reverse=True)[:COUNTRY_TOP]
         politics = topics.get(cc, {}).get('politics', [])
         money = topics.get(cc, {}).get('money', [])
         by_lang = {}
