@@ -12,6 +12,6 @@ country each is based in. The countries come from the GDELT Project's list of ne
 they are GDELT's estimate and can be wrong, and an outlet that is not on the list has none.
 
 `tiles/country/<cc>.json` is one country's news at home in the last 24 hours (`cc` is GDELT's FIPS country code): `top`
-its most carried stories, `politics` and `money` its rows of the two topic files. A story is a country's own when
+its stories (those an outlet based there carries first, then the most carried), `politics` and `money` its rows of the two topic files. A story is a country's own when
 its first city is there and it names that country most. `tiles/country/index.json` counts each country's stories
 by language.
