@@ -40,4 +40,31 @@ big = next(r for r in rows if 'ds' in r)
 ok(big['n'] == 4 and big['ds'] == ['nytimes.com', 'lemonde.fr', 'x.wordpress.com', 'bbc.co.uk'] and big['dc'] == ['US', 'FR', '', 'UK'] and len(big['us']) == 4, 'a second run adds to the first: 4 outlets, 3 countries, one unknown')
 one = next(r for r in rows if 'ds' not in r)
 ok(one.get('dc') == ['US'] and 'us' not in one, 'a one-outlet row carries its outlet country')
+# country files
+c = tempfile.mkdtemp()
+row = lambda u, t, cc='FR', mc=None, n=1, ts='20991231000000', lg='fra', **more: dict({'u': u, 'd': u.split('/')[2], 't': t, 'la': 1, 'lo': 1, 'pl': 'X', 'cc': cc, 'ct': '3', 'ts': ts, 'lg': lg, 'im': '', 'tn': 0, 'n': n}, **({'mc': mc} if mc else {}), **more)
+put = lambda name, rows: json.dump({'s': rows}, open(os.path.join(c, name), 'w', encoding='utf-8'))
+put('40_0.json', [row('https://a.fr/%d' % i, 'Une histoire de France numero %d bien distincte' % i, mc='FR', n=i + 1) for i in range(15)]
+    + [row('https://lemonde.fr/copy', 'Une histoire de France numero 14 bien distincte', mc='FR', n=40),
+       row('https://b.com/us', 'A story that opens in Paris about America', mc='US', lg='eng'),
+       row('https://c.fr/old', 'Une vieille histoire de la semaine derniere', mc='FR', ts='20000101000000'),
+       row('https://d.de/1', 'Eine Geschichte aus der Zeit vor dem Landeszeichen', cc='GM', lg='deu'),
+       row('https://e.com/1', 'A story placed nowhere in particular at all', cc='', lg='eng')])
+put('politics.json', [row('https://a.fr/3', 'Une histoire de France numero 3 bien distincte', mc='FR', pg=['vote']), row('https://p.fr/1', 'Le parlement vote le budget de la nation', mc='FR', pg=['law']), row('https://p.com/2', 'A vote in Paris about Washington', mc='US', lg='eng', pg=['vote'])])
+put('money.json', [row('https://m.fr/1', 'La banque centrale garde son taux directeur', mc='FR', mg=['rate'])])
+open(os.path.join(c, 'state.json'), 'w').write('{}')
+os.makedirs(os.path.join(c, 'country')); open(os.path.join(c, 'country', 'ZZ.json'), 'w').write('{}')
+n, total = g.write_countries(c, '20500101000000')
+fr = json.load(open(os.path.join(c, 'country', 'FR.json'), encoding='utf-8'))
+ok(len(fr['top']) == g.COUNTRY_TOP and fr['top'][0]['u'] == 'https://lemonde.fr/copy' and fr['top'][0]['n'] == 40, 'top: the twelve most carried, one row per headline, the bigger copy kept')
+ok(all(s['u'] != 'https://b.com/us' and s['u'] != 'https://c.fr/old' for s in fr['top']), 'top: no story that names another country most, none older than a day')
+ok([s['u'] for s in fr['politics']] == ['https://a.fr/3', 'https://p.fr/1'] and [s['u'] for s in fr['money']] == ['https://m.fr/1'], 'politics and money: the rows at home only')
+ok(fr['cc'] == 'FR' and fr['source'] == 'GDELT' and 'dc' in fr['top'][0], 'the file names its country and source; top rows carry outlet countries')
+ok(os.path.exists(os.path.join(c, 'country', 'GM.json')) and not os.path.exists(os.path.join(c, 'country', 'US.json')), 'a row from before mc counts by its first city; a country only named from abroad gets no file')
+ok(not os.path.exists(os.path.join(c, 'country', 'ZZ.json')), 'a country that went quiet loses its file')
+idx = json.load(open(os.path.join(c, 'country', 'index.json'), encoding='utf-8'))['c']
+ok(n == 2 and set(idx) == {'FR', 'GM'} and idx['GM'] == {'deu': 1}, 'the index lists the countries with a file')
+ok(idx['FR'] == {'fra': 14} and total == 15, 'the index counts a story once across the three lists (12 top, of which one is in politics, plus 2)')
+os.makedirs(os.path.join(c, 'x'), exist_ok=True)
+ok(sorted(n_ for n_ in os.listdir(c) if n_.endswith('.json') and n_ not in g.NOT_TILES) == ['40_0.json'], 'the country folder is not taken for a tile')
 print('all good')

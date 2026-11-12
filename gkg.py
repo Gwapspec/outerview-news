@@ -71,6 +71,10 @@ POL_MAX = 1500
 # One story, every outlet: a row carried by several outlets names up to OUTLETS of them (ds), each with its own
 # link (us, in the same order) and the country it is based in (dc, in the same order, '' when not known).
 OUTLETS = 40
+# A country's own file (country/<cc>.json): its most carried stories of the day, and its politics and money rows.
+COUNTRY_DIR = 'country'
+COUNTRY_TOP = 12
+CC_RE = re.compile(r'^[A-Z]{2}$')
 # Where an outlet is based comes from GDELT's own list of news sites by country (May 2018), trimmed to site and
 # country code in outlet-countries.tsv. It is GDELT's estimate, from the places each site wrote about most; it is
 # from 2018 and it can be wrong. A site that is not on the list has no country, and neither has a site on a shared
@@ -345,8 +349,9 @@ def parse(zip_bytes, default_lang):
                 politics = politics_groups(cols[7], cols[8])
                 if politics:
                     row['pg'] = politics
-                if groups or politics:
-                    row['mc'] = main_country(cols[10]) or loc['cc']
+                # Every row carries the country it names most, so "news from a country" can leave out a story that
+                # only opens there (country/<cc>.json). Money and politics news have needed it from the start.
+                row['mc'] = main_country(cols[10]) or loc['cc']
                 out.append(row)
     return out
 
@@ -414,6 +419,66 @@ def write_money(out_dir, stories, cutoff):
 def write_politics(out_dir, stories, cutoff):
     """politics.json: for each country its most carried stories and its newest, at most POL_PER_COUNTRY."""
     return write_topic(out_dir, stories, cutoff, 'politics.json', 'pg', POL_PER_COUNTRY, POL_MAX, covered=True)
+
+
+def at_home(s):
+    """A story is a country's own when its first city is there and it names that country most (the app's test).
+    A row from before every row carried 'mc' counts by its first city alone."""
+    cc = s.get('cc') or ''
+    return bool(CC_RE.match(cc)) and (s.get('mc') or cc) == cc
+
+
+def write_countries(out_dir, cutoff):
+    """country/<cc>.json for every country with news at home in the last day (cc is GDELT's FIPS code):
+    'top' = its COUNTRY_TOP most carried stories from every tile (the newest first among equals), 'politics' and
+    'money' = its rows of politics.json and money.json. One small file per country, so a country page reads a few
+    kilobytes and not three whole-world files. country/index.json counts each country's stories by language, so
+    the site map can list only the pages that have something to read. Files of countries that went quiet go."""
+    def rows_of(name):
+        try:
+            with open(os.path.join(out_dir, name), encoding='utf-8') as f:
+                return [s for s in json.load(f).get('s', []) if s.get('ts', '') >= cutoff and s.get('u') and s.get('t') and at_home(s)]
+        except Exception:  # noqa: BLE001
+            return []
+
+    most = lambda s: (s.get('n', 1), s['ts'])  # noqa: E731
+    best = {}
+    for name in os.listdir(out_dir):
+        if not name.endswith('.json') or name in NOT_TILES:
+            continue
+        for s in rows_of(name):
+            mine = best.setdefault(s['cc'], {})
+            key = title_key(s['t'])[:60]
+            if key not in mine or most(s) > most(mine[key]):
+                mine[key] = s
+    topics = {}
+    for part, name in (('politics', 'politics.json'), ('money', 'money.json')):
+        for s in rows_of(name):
+            topics.setdefault(s['cc'], {}).setdefault(part, []).append(s)
+
+    folder = os.path.join(out_dir, COUNTRY_DIR)
+    os.makedirs(folder, exist_ok=True)
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    counts = {}
+    for cc in sorted(set(best) | set(topics)):
+        top = sorted(best.get(cc, {}).values(), key=most, reverse=True)[:COUNTRY_TOP]
+        politics = topics.get(cc, {}).get('politics', [])
+        money = topics.get(cc, {}).get('money', [])
+        by_lang = {}
+        seen = set()
+        for s in top + politics + money:
+            if s['u'] not in seen:
+                seen.add(s['u'])
+                by_lang[s.get('lg') or 'und'] = by_lang.get(s.get('lg') or 'und', 0) + 1
+        counts[cc] = by_lang
+        with open(os.path.join(folder, f'{cc}.json'), 'w', encoding='utf-8') as f:
+            json.dump({'updated': now, 'source': 'GDELT', 'cc': cc, 'top': finish(top), 'politics': politics, 'money': money}, f, ensure_ascii=False, separators=(',', ':'))
+    for name in os.listdir(folder):
+        if name.endswith('.json') and name != 'index.json' and name[:-5] not in counts:
+            os.remove(os.path.join(folder, name))
+    with open(os.path.join(folder, 'index.json'), 'w', encoding='utf-8') as f:
+        json.dump({'updated': now, 'source': 'GDELT', 'c': counts}, f, separators=(',', ':'))
+    return len(counts), sum(sum(c.values()) for c in counts.values())
 
 
 def main(out_dir):
@@ -537,6 +602,11 @@ def main(out_dir):
         print('politics stories:', rows, '| countries:', countries)
     except Exception as e:  # noqa: BLE001  (politics news is extra too)
         print('politics.json not written:', e)
+    try:
+        countries, rows = write_countries(out_dir, cutoff)
+        print('country files:', countries, '| their stories:', rows)
+    except Exception as e:  # noqa: BLE001  (country files are extra too)
+        print('country files not written:', e)
 
 
 if __name__ == '__main__':
