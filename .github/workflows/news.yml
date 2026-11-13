@@ -36,7 +36,11 @@ jobs:
         run: |
           if [ -n "$PUSH_RUN_TOKEN" ]; then curl -s -m 60 -X POST https://outerview.world/api/push/run -H "Authorization: Bearer $PUSH_RUN_TOKEN"; echo; fi
         continue-on-error: true
+      # A refused push (2026-11-13: GitHub's push protection took a headline link for a token) must not stop the
+      # clock below, or the news stops until the rare cron fires. The run goes on; Sentry hears nothing and warns.
       - name: Publish the data branch
+        id: publish
+        continue-on-error: true
         working-directory: out
         run: |
           git init -q
@@ -50,6 +54,7 @@ jobs:
       # Sentry's cron monitor "news-clock" (free, one is included): each run that published says so. If no word
       # comes for 35 minutes, Sentry opens an issue and emails. It watches from outside GitHub (checkin.py).
       - name: Tell Sentry the news went out
+        if: ${{ steps.publish.outcome == 'success' }}
         run: python3 -I checkin.py
         continue-on-error: true
       # GitHub switches off the schedule of a public repository after 60 days with no activity, and it is not

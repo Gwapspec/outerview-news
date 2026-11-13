@@ -27,6 +27,13 @@ MAX_PER_TILE = 500
 TITLE_RE = re.compile(r'<PAGE_TITLE>(.*?)</PAGE_TITLE>', re.S)
 LANG_RE = re.compile(r'srclc:([a-z]{3})')
 BAD_TITLE = re.compile(r'^(home|news|untitled|404|403|page not found|access denied)\b', re.I)
+# A link or title shaped like a service's login token. GitHub's push protection refuses a push that holds one, and on
+# 2026-11-13 one headline link ("Lichess OAuth Access Token", tiles/40_-10.json) stopped the news for over two hours.
+# Such a story is left out: one story lost, never the whole run. The shapes are the providers' published prefixes.
+TOKENISH = re.compile(r'li[op]_[A-Za-z0-9]{16}|gh[pousr]_[A-Za-z0-9]{30}|github_pat_[A-Za-z0-9_]{30}|xox[abprs]-[A-Za-z0-9-]{10}'
+                      r'|[sr]k_(?:live|test)_[A-Za-z0-9]{16}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|glpat-[A-Za-z0-9_-]{20}'
+                      r'|npm_[A-Za-z0-9]{36}|sk-ant-[A-Za-z0-9_-]{20}|hf_[A-Za-z0-9]{30}|shpat_[a-fA-F0-9]{32}'
+                      r'|dop_v1_[a-f0-9]{64}|pypi-[A-Za-z0-9_-]{50}|SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}')
 # Money news (money.json): GDELT marks each document with themes. One theme alone is noise (a crime story that
 # names a bank), so a story counts as money news when its themes fall in two or more of these groups and at least
 # one of them is a market group. Tested on live files 2026-11-11: about 1 story in 44.
@@ -343,6 +350,8 @@ def parse(zip_bytes, default_lang):
                     'im': cols[18][:300] if cols[18] else '',
                     'tn': tone,
                 }
+                if TOKENISH.search(row['u']) or TOKENISH.search(row['t']) or TOKENISH.search(row['im']):
+                    continue
                 groups = money_groups(cols[7])
                 if groups:
                     row['mg'] = groups
