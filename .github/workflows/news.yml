@@ -30,6 +30,10 @@ jobs:
       - name: Upcoming launches (The Space Devs, at most once an hour)
         run: python3 -I launches.py out/tiles
         continue-on-error: true
+      - name: Wind (NOAA GFS 10 m, only when a new run is out, about 4 times a day; world-view docs/WIND.md)
+        run: python3 -I wind.py out/wind
+        timeout-minutes: 5
+        continue-on-error: true
       - name: Alert run (web push for watched places)
         env:
           PUSH_RUN_TOKEN: ${{ secrets.PUSH_RUN_TOKEN }}

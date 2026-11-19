@@ -15,3 +15,14 @@ they are GDELT's estimate and can be wrong, and an outlet that is not on the lis
 its stories (those an outlet based there carries first, then the most carried), `politics` and `money` its rows of the two topic files. A story is a country's own when
 its first city is there and it names that country most. `tiles/country/index.json` counts each country's stories
 by language.
+
+## wind/
+
+The wind for OuterView's Wind layer (world-view `docs/WIND.md`), from NOAA's GFS model (public domain), refreshed when
+a new run is out (00, 06, 12 and 18 UTC, about 3.5 hours later), by `wind.py` in the news job.
+
+- `wind/latest.png`: 360 x 181 pixels, 8-bit RGB. Red is the wind toward the east (u), green toward the north (v), each
+  0 to 255 for -50 to 50 m/s, 10 m above the ground. Rows run from 90 N down to 90 S, columns from 0 E eastward, one
+  degree apart.
+- `wind/meta.json`: the run (`run`, `valid`), the grid (`w`, `h`, `lat0`, `lon0`, `step`) and the scale (`min`, `max`).
+
