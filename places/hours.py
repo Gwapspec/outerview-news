@@ -185,7 +185,7 @@ def main(args):
     else:
         table = f"(SELECT * FROM read_parquet('{LAYERCAKE}') WHERE {WANTED})"
     today = dt.datetime.now(ZoneInfo('UTC'))
-    made = today.strftime('%Y-%m-%d')
+    made = today.strftime('%Y-%m-%dT%H:%MZ')  # to the minute: two runs in a day are told apart
     done, total, unread = {}, 0, 0  # city -> (rows, {place id: wikidata id}, places)
     for i, city in enumerate(cities):
         places = our_places(city['id'])
@@ -195,11 +195,14 @@ def main(args):
         lngs = [p['lng'] for p in places]
         box = (min(lngs) - MARGIN, min(lats) - MARGIN, max(lngs) + MARGIN, max(lats) + MARGIN)
         rows, wds = [], {}
-        for p, c in match(places, osm_rows(con, table, box)):
+        cands = osm_rows(con, table, box)
+        # Two matchings, each the nearest same-named object of its kind: one with hours, one with a Wikidata link. (One
+        # matching over both let a nearer building with a Wikidata link and no hours take a place's hours away.)
+        for p, c in match(places, [c for c in cands if c[5] and re.fullmatch(r'Q\d+', c[5])]):
+            wds[p['id']] = c[5]
+        for p, c in match(places, [c for c in cands if c[4]]):
             if c[5] and re.fullmatch(r'Q\d+', c[5]):
-                wds[p['id']] = c[5]
-            if not c[4]:
-                continue  # a Wikidata link and no hours: a photo only
+                wds.setdefault(p['id'], c[5])
             w = window(c[4], c[7], c[6], today)
             if w is None:
                 unread += 1
