@@ -18,7 +18,7 @@ OpenStreetMap and are offered under the same licence. Place ids are [Overture Ma
 **Photos:** a matched object's Wikidata id gives its image (P18, CC0 data); each file's author and licence come from
 [Wikimedia Commons](https://commons.wikimedia.org) (every Commons file allows reuse; credit the author and the licence).
 
-`<cc>_<name>.json`: `{ place, made, rows: [{ id, osm, d, o, n?, wd? }], photos: [{ id, wd, f, a, l, lu, t }] }`. `id` is the Overture id, `osm` the
+`<cc>_<name>.json`: `{ place, made, rows: [{ id, osm, d, o, n?, wd? }], photos: [{ id, wd, f, a, l, lu, t }], closed: [{ id, s }] }`. In `closed`, `s` is `perm` (closed for good) or `temp` (closed for now), from Overture Maps' own `operating_status` in its newest release. `id` is the Overture id, `osm` the
 OpenStreetMap object (`n` node, `w` way, `r` relation, then its number), `d` the place's local date the window starts,
 `o` the open stretches as start and end minutes from that date's midnight on the place's own clock (14 days: 0 to
 20160), `n` a note OpenStreetMap gives with a closure, `wd` its Wikidata id. In `photos`: `f` the Commons file name, `a` its author, `l` its licence and `lu` the licence's link, `t` a 960-pixel

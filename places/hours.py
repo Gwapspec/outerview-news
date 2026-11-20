@@ -10,6 +10,9 @@ Photos (module 2): a matched OpenStreetMap object's `wikidata` id gives its Wiki
 Service, 300 ids a query); Wikimedia Commons gives each file's author and licence (extmetadata, 50 files a call, one
 call at a time). A file with no author is kept only when it is public domain or CC0. Every Commons file allows reuse.
 
+Closed places (row 25's last piece): Overture's own `operating_status` for our places, read from its newest release (id
+and status only, from each of its place files): a place closed for good leaves the shelves, one closed for now says so.
+
 Writes out/<cc>_<name>.json per city and out/index.json; the workflow publishes them on the `hours` branch, rewritten
 each run. This script is the method of matching that ODbL 4.6 asks us to offer; the files are the OSM-derived table.
 Data: (c) OpenStreetMap contributors, ODbL 1.0. Places: Overture Maps (see places/README.md).
@@ -44,6 +47,7 @@ NEAR_M = 80
 MARGIN = 0.002  # degrees around a city's places when reading OpenStreetMap
 WANTED = 'name IS NOT NULL AND (opening_hours IS NOT NULL OR wikidata IS NOT NULL)'
 WDQS = 'https://query.wikidata.org/sparql'
+OVERTURE = 'https://overturemaps-us-west-2.s3.amazonaws.com'
 COMMONS = 'https://commons.wikimedia.org/w/api.php'
 PICTURE = {'image/jpeg', 'image/png', 'image/webp', 'image/svg+xml', 'image/tiff'}
 
@@ -187,6 +191,7 @@ def main(args):
     today = dt.datetime.now(ZoneInfo('UTC'))
     made = today.strftime('%Y-%m-%dT%H:%MZ')  # to the minute: two runs in a day are told apart
     done, total, unread = {}, 0, 0  # city -> (rows, {place id: wikidata id}, places)
+    ids = {}  # city -> our place ids (for Overture's closed ones)
     for i, city in enumerate(cities):
         places = our_places(city['id'])
         if not places:
@@ -214,6 +219,7 @@ def main(args):
             if c[5]:
                 row['wd'] = c[5]
             rows.append(row)
+        ids[city['id']] = [p['id'] for p in places if p.get('id')]
         if rows or wds:
             done[city['id']] = (rows, wds, len(places))
             total += len(rows)
@@ -229,6 +235,15 @@ def main(args):
     credits = commons_credits(sorted(set(images.values())))
     print(f'photos: {len(every_wd)} Wikidata links, {len(images)} with an image, {len(credits)} with a usable credit ({time.time() - t0:.0f} s)', flush=True)
 
+    # Closed: Overture's word for our places.
+    shut = overture_closed(con)
+    closed = {c: [{'id': i, 's': shut[i]} for i in lst if i in shut] for c, lst in ids.items()}
+    closed = {c: v for c, v in closed.items() if v}
+    print(f'closed: {sum(len(v) for v in closed.values())} of our places in {len(closed)} cities ({sum(1 for v in closed.values() for x in v if x["s"] == "perm")} for good) ({time.time() - t0:.0f} s)', flush=True)
+    for c in closed:
+        if c not in done:
+            done[c] = ([], {}, len(ids.get(c, [])))
+
     index = {}
     for city_id, (rows, wds, n_places) in done.items():
         photos = []
@@ -237,14 +252,31 @@ def main(args):
             cr = credits.get(f) if f else None
             if cr:
                 photos.append({'id': pid, 'wd': q, 'f': f, **cr})
-        if not rows and not photos:
+        shut_here = closed.get(city_id, [])
+        if not rows and not photos and not shut_here:
             continue
         with open(os.path.join(OUT, f"{city_id.replace('/', '_')}.json"), 'w', encoding='utf-8') as fh:
-            json.dump({'place': city_id, 'made': made, 'rows': rows, 'photos': photos}, fh, ensure_ascii=False, separators=(',', ':'))
-        index[city_id] = {'n': len(rows), 'ph': len(photos), 'of': n_places, 'made': made}
+            json.dump({'place': city_id, 'made': made, 'rows': rows, 'photos': photos, 'closed': shut_here}, fh, ensure_ascii=False, separators=(',', ':'))
+        index[city_id] = {'n': len(rows), 'ph': len(photos), 'shut': len(shut_here), 'of': n_places, 'made': made}
     with open(os.path.join(OUT, 'index.json'), 'w', encoding='utf-8') as fh:
         json.dump(index, fh, separators=(',', ':'))
     print(f'done: {sum(v["n"] for v in index.values())} places with hours, {sum(v["ph"] for v in index.values())} with a photo, {len(index)} cities; {time.time() - t0:.0f} s', flush=True)
+
+
+def overture_closed(con):
+    """Overture's newest release: every place it marks closed, by id ('perm' closed for good, 'temp' closed for now).
+    Only two columns of each place file are read."""
+    try:
+        listing = urllib.request.urlopen(urllib.request.Request(f'{OVERTURE}/?list-type=2&prefix=release/&delimiter=/', headers={'user-agent': UA}), timeout=60).read().decode()
+        release = sorted(re.findall(r'<Prefix>release/([^<]+)/</Prefix>', listing))[-1]
+        files = urllib.request.urlopen(urllib.request.Request(f'{OVERTURE}/?list-type=2&prefix=release/{release}/theme=places/type=place/&max-keys=1000', headers={'user-agent': UA}), timeout=60).read().decode()
+        urls = [f'{OVERTURE}/{k}' for k in re.findall(r'<Key>([^<]+\.parquet)</Key>', files)]
+        rows = con.execute(f"SELECT id, operating_status FROM read_parquet({urls!r}) WHERE operating_status IN ('permanently_closed', 'temporarily_closed')").fetchall()
+        print(f'overture {release}: {len(urls)} place files, {len(rows)} closed', flush=True)
+        return {i: ('perm' if s == 'permanently_closed' else 'temp') for i, s in rows}
+    except Exception as e:  # noqa: BLE001 - without it the shelves are as before
+        print(f'overture: not read ({e})', flush=True)
+        return {}
 
 
 def post_json(url, data, accept='application/json'):
