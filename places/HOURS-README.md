@@ -1,4 +1,4 @@
-# Opening hours for OuterView's places
+# Opening hours and photos for OuterView's places
 
 Once a week, OpenStreetMap's `opening_hours` matched to the places on [OuterView](https://outerview.world)'s Boards and
 worked out for the next 14 days. Made by `places/hours.py` on the `main` branch (the method of matching, published as
@@ -15,8 +15,12 @@ OpenStreetMap and are offered under the same licence. Place ids are [Overture Ma
 - **Hours:** the [opening-hours](https://github.com/remi-dupre/opening-hours-rs) parser (MIT or Apache-2.0), with the
   time zone and public holidays of the place's coordinates.
 
-`<cc>_<name>.json`: `{ place, made, rows: [{ id, osm, d, o, n?, wd? }] }`. `id` is the Overture id, `osm` the
+**Photos:** a matched object's Wikidata id gives its image (P18, CC0 data); each file's author and licence come from
+[Wikimedia Commons](https://commons.wikimedia.org) (every Commons file allows reuse; credit the author and the licence).
+
+`<cc>_<name>.json`: `{ place, made, rows: [{ id, osm, d, o, n?, wd? }], photos: [{ id, wd, f, a, l, lu, t }] }`. `id` is the Overture id, `osm` the
 OpenStreetMap object (`n` node, `w` way, `r` relation, then its number), `d` the place's local date the window starts,
 `o` the open stretches as start and end minutes from that date's midnight on the place's own clock (14 days: 0 to
-20160), `n` a note OpenStreetMap gives with a closure, `wd` its Wikidata id. `index.json`: per city, how many places
-have hours (`n`) of how many (`of`), and the run's date.
+20160), `n` a note OpenStreetMap gives with a closure, `wd` its Wikidata id. In `photos`: `f` the Commons file name, `a` its author, `l` its licence and `lu` the licence's link, `t` a 960-pixel
+picture. `index.json`: per city, how many places have hours (`n`) and photos (`ph`) of how many (`of`), and the run's
+date.

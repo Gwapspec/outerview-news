@@ -1,10 +1,14 @@
-"""Opening hours for OuterView's places (world-view docs/HOURS.md, Game Plan row 25, module 1).
+"""Opening hours and photos for OuterView's places (world-view docs/HOURS.md, Game Plan row 25, modules 1 and 2).
 
 Once a week: OpenStreetMap's places with `opening_hours` (OpenStreetMap US's Layercake `pois.parquet`, read with DuckDB,
 only the columns needed) are matched to each city's places on OuterView's Boards (Overture ids), by name within 80 m,
 and each match's hours are worked out for the next 14 days in the place's own time zone, with its country's public
 holidays (the `opening-hours` crate's Python build, MIT or Apache-2.0). The output is plain minutes, so the app needs no
 parser, and hours older than two weeks are never shown.
+
+Photos (module 2): a matched OpenStreetMap object's `wikidata` id gives its Wikidata image (P18, the Wikidata Query
+Service, 300 ids a query); Wikimedia Commons gives each file's author and licence (extmetadata, 50 files a call, one
+call at a time). A file with no author is kept only when it is public domain or CC0. Every Commons file allows reuse.
 
 Writes out/<cc>_<name>.json per city and out/index.json; the workflow publishes them on the `hours` branch, rewritten
 each run. This script is the method of matching that ODbL 4.6 asks us to offer; the files are the OSM-derived table.
@@ -23,6 +27,9 @@ import time
 import unicodedata
 import urllib.request
 
+import urllib.parse
+import html as htmllib
+
 import duckdb
 from zoneinfo import ZoneInfo
 import opening_hours as oh
@@ -35,6 +42,10 @@ OUT = os.environ.get('HOURS_OUT', os.path.join(HERE, '..', 'out-hours'))
 DAYS = 14
 NEAR_M = 80
 MARGIN = 0.002  # degrees around a city's places when reading OpenStreetMap
+WANTED = 'name IS NOT NULL AND (opening_hours IS NOT NULL OR wikidata IS NOT NULL)'
+WDQS = 'https://query.wikidata.org/sparql'
+COMMONS = 'https://commons.wikimedia.org/w/api.php'
+PICTURE = {'image/jpeg', 'image/png', 'image/webp', 'image/svg+xml', 'image/tiff'}
 
 
 def fold(s):
@@ -167,14 +178,15 @@ def main(args):
         # The full extract: every named place with hours, once (only five columns are read).
         con.execute(
             f"""CREATE TABLE osm AS SELECT type, id, name, names, opening_hours, wikidata, bbox FROM read_parquet('{LAYERCAKE}')
-                WHERE opening_hours IS NOT NULL AND name IS NOT NULL"""
+                WHERE {WANTED}"""
         )
         table = 'osm'
-        print(f'extract: {con.execute("SELECT count(*) FROM osm").fetchone()[0]} places with hours, {time.time() - t0:.0f} s', flush=True)
+        print(f'extract: {con.execute("SELECT count(*) FROM osm").fetchone()[0]} named places with hours or a Wikidata link, {time.time() - t0:.0f} s', flush=True)
     else:
-        table = f"(SELECT * FROM read_parquet('{LAYERCAKE}') WHERE opening_hours IS NOT NULL AND name IS NOT NULL)"
+        table = f"(SELECT * FROM read_parquet('{LAYERCAKE}') WHERE {WANTED})"
     today = dt.datetime.now(ZoneInfo('UTC'))
-    index, total, unread = {}, 0, 0
+    made = today.strftime('%Y-%m-%d')
+    done, total, unread = {}, 0, 0  # city -> (rows, {place id: wikidata id}, places)
     for i, city in enumerate(cities):
         places = our_places(city['id'])
         if not places:
@@ -182,8 +194,12 @@ def main(args):
         lats = [p['lat'] for p in places]
         lngs = [p['lng'] for p in places]
         box = (min(lngs) - MARGIN, min(lats) - MARGIN, max(lngs) + MARGIN, max(lats) + MARGIN)
-        rows = []
+        rows, wds = [], {}
         for p, c in match(places, osm_rows(con, table, box)):
+            if c[5] and re.fullmatch(r'Q\d+', c[5]):
+                wds[p['id']] = c[5]
+            if not c[4]:
+                continue  # a Wikidata link and no hours: a photo only
             w = window(c[4], c[7], c[6], today)
             if w is None:
                 unread += 1
@@ -193,21 +209,100 @@ def main(args):
             if note:
                 row['n'] = note
             if c[5]:
-                row['wd'] = c[5]  # module 2's photos
+                row['wd'] = c[5]
             rows.append(row)
-        if rows:
-            name = city['id'].replace('/', '_')
-            with open(os.path.join(OUT, f'{name}.json'), 'w', encoding='utf-8') as f:
-                json.dump({'place': city['id'], 'made': today.strftime('%Y-%m-%d'), 'rows': rows}, f, ensure_ascii=False, separators=(',', ':'))
-            index[city['id']] = {'n': len(rows), 'of': len(places), 'made': today.strftime('%Y-%m-%d')}
+        if rows or wds:
+            done[city['id']] = (rows, wds, len(places))
             total += len(rows)
         if (i + 1) % 200 == 0 or len(cities) <= 20:
-            print(f'{i + 1}/{len(cities)} {city["id"]}: {len(rows)} of {len(places)} with hours ({time.time() - t0:.0f} s)', flush=True)
+            print(f'{i + 1}/{len(cities)} {city["id"]}: {len(rows)} of {len(places)} with hours, {len(wds)} with a Wikidata link ({time.time() - t0:.0f} s)', flush=True)
         if not os.path.exists(os.path.join(HERE, 'data', city['id'].replace('/', '_') + '.jsonl')):
             time.sleep(0.3)  # the site's answer: gently
-    with open(os.path.join(OUT, 'index.json'), 'w', encoding='utf-8') as f:
-        json.dump(index, f, separators=(',', ':'))
-    print(f'done: {total} places with hours in {len(index)} cities; {unread} values the parser could not read; {time.time() - t0:.0f} s', flush=True)
+    print(f'hours: {total} places in {sum(1 for r, _, _ in done.values() if r)} cities; {unread} values the parser could not read; {time.time() - t0:.0f} s', flush=True)
+
+    # Photos: Wikidata's image for each linked place, then each file's author and licence from Commons.
+    every_wd = sorted({q for _, wds, _ in done.values() for q in wds.values()})
+    images = wikidata_images(every_wd)
+    credits = commons_credits(sorted(set(images.values())))
+    print(f'photos: {len(every_wd)} Wikidata links, {len(images)} with an image, {len(credits)} with a usable credit ({time.time() - t0:.0f} s)', flush=True)
+
+    index = {}
+    for city_id, (rows, wds, n_places) in done.items():
+        photos = []
+        for pid, q in wds.items():
+            f = images.get(q)
+            cr = credits.get(f) if f else None
+            if cr:
+                photos.append({'id': pid, 'wd': q, 'f': f, **cr})
+        if not rows and not photos:
+            continue
+        with open(os.path.join(OUT, f"{city_id.replace('/', '_')}.json"), 'w', encoding='utf-8') as fh:
+            json.dump({'place': city_id, 'made': made, 'rows': rows, 'photos': photos}, fh, ensure_ascii=False, separators=(',', ':'))
+        index[city_id] = {'n': len(rows), 'ph': len(photos), 'of': n_places, 'made': made}
+    with open(os.path.join(OUT, 'index.json'), 'w', encoding='utf-8') as fh:
+        json.dump(index, fh, separators=(',', ':'))
+    print(f'done: {sum(v["n"] for v in index.values())} places with hours, {sum(v["ph"] for v in index.values())} with a photo, {len(index)} cities; {time.time() - t0:.0f} s', flush=True)
+
+
+def post_json(url, data, accept='application/json'):
+    req = urllib.request.Request(url, data=urllib.parse.urlencode(data).encode(), headers={'user-agent': UA, 'accept': accept, 'content-type': 'application/x-www-form-urlencoded'})
+    with urllib.request.urlopen(req, timeout=90) as r:
+        return json.load(r)
+
+
+def wikidata_images(qids):
+    """Wikidata id -> its image's file name (P18, the first one), 300 ids a query, one query at a time."""
+    out = {}
+    for i in range(0, len(qids), 300):
+        part = qids[i:i + 300]
+        q = 'SELECT ?item ?img WHERE { VALUES ?item { ' + ' '.join(f'wd:{x}' for x in part) + ' } ?item wdt:P18 ?img }'
+        for attempt in range(3):
+            try:
+                res = post_json(WDQS, {'query': q, 'format': 'json'}, 'application/sparql-results+json')
+                for b in res['results']['bindings']:
+                    item = b['item']['value'].rsplit('/', 1)[-1]
+                    name = urllib.parse.unquote(b['img']['value'].rsplit('/', 1)[-1]).replace('_', ' ')
+                    out.setdefault(item, name)
+                break
+            except Exception as e:  # noqa: BLE001 - try again, then go on without these
+                print(f'  wikidata {i}: {e}', flush=True)
+                time.sleep(10 * (attempt + 1))
+        time.sleep(1)
+    return out
+
+
+def plain(s, cap=80):
+    """Commons' HTML credit as plain words."""
+    s = htmllib.unescape(re.sub(r'<[^>]+>', ' ', str(s or '')))
+    return re.sub(r'\s+', ' ', s).strip()[:cap]
+
+
+def commons_credits(files):
+    """File name -> {a: author, l: licence, lu: its link, t: a 960-pixel picture}, 50 files a call, under 5 calls a second.
+    Only pictures; a file with no author only when public domain or CC0."""
+    out = {}
+    for i in range(0, len(files), 50):
+        part = files[i:i + 50]
+        try:
+            res = post_json(COMMONS, {'action': 'query', 'format': 'json', 'formatversion': '2', 'prop': 'imageinfo', 'iiprop': 'url|mime|extmetadata', 'iiurlwidth': '960', 'iiextmetadatafilter': 'Artist|LicenseShortName|LicenseUrl', 'titles': '|'.join('File:' + f for f in part)})
+        except Exception as e:  # noqa: BLE001
+            print(f'  commons {i}: {e}', flush=True)
+            time.sleep(5)
+            continue
+        for pg in res.get('query', {}).get('pages', []):
+            info = (pg.get('imageinfo') or [None])[0]
+            if not info or info.get('mime') not in PICTURE or not info.get('thumburl'):
+                continue
+            meta = info.get('extmetadata') or {}
+            author = plain((meta.get('Artist') or {}).get('value'))
+            lic = plain((meta.get('LicenseShortName') or {}).get('value'), 40)
+            free = re.search(r'public domain|cc0|pd', lic, re.I)
+            if not lic or (not author and not free):
+                continue
+            name = pg['title'].split(':', 1)[1]
+            out[name] = {'a': author or 'Unknown author', 'l': lic, 'lu': (meta.get('LicenseUrl') or {}).get('value') or '', 't': info['thumburl'].split('?', 1)[0]}
+        time.sleep(0.3)
+    return out
 
 
 if __name__ == '__main__':
