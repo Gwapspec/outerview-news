@@ -1,0 +1,34 @@
+# Opening hours for OuterView's places (world-view docs/HOURS.md, Game Plan row 25): once a week, OpenStreetMap's hours
+# matched to each city's places and worked out for the next 14 days (places/hours.py). Published on the `hours` branch,
+# rewritten each run so the repository stays small. Data (c) OpenStreetMap contributors, ODbL 1.0.
+name: hours
+on:
+  schedule:
+    - cron: '40 2 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  hours:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q duckdb==2.0.0 opening-hours-py==1.2.0
+      - run: python3 -I places/hours.py
+        env:
+          HOURS_OUT: out
+      - name: Publish the hours branch
+        working-directory: out
+        run: |
+          cp ../places/HOURS-README.md README.md
+          git init -q
+          git checkout -q --orphan fresh
+          git config user.name "outerview-hours"
+          git config user.email "hours@outerview.world"
+          git add -A
+          git commit -q -m "hours $(date -u +%F)"
+          git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" fresh:hours
