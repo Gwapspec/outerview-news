@@ -24,3 +24,9 @@ OpenStreetMap object (`n` node, `w` way, `r` relation, then its number), `d` the
 20160), `n` a note OpenStreetMap gives with a closure, `wd` its Wikidata id. In `photos`: `f` the Commons file name, `a` its author, `l` its licence and `lu` the licence's link, `t` a 960-pixel
 picture. `index.json`: per city, how many places have hours (`n`) and photos (`ph`) of how many (`of`), and the run's
 date.
+
+**`markets.json`** (world-view docs/MARKETS.md): each stock exchange's next 14 days from
+[exchange_calendars](https://github.com/gerrymanoim/exchange_calendars) (Apache-2.0), in the exchange's own time and the
+same form (`d`, `o`), with `hol` (weekdays with no session, as days from `d`) and `w` (how many of the 14 days the
+calendar knows); `world` lists the twelve shown together. Only times: no prices.
+

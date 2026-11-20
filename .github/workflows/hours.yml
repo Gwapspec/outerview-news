@@ -1,4 +1,4 @@
-# Opening hours for OuterView's places (world-view docs/HOURS.md, Game Plan row 25): once a week, OpenStreetMap's hours
+# Opening hours and photos for OuterView's places, and stock exchanges' sessions (world-view docs/HOURS.md, Game Plan row 25): once a week, OpenStreetMap's hours
 # matched to each city's places and worked out for the next 14 days (places/hours.py). Published on the `hours` branch,
 # rewritten each run so the repository stays small. Data (c) OpenStreetMap contributors, ODbL 1.0.
 name: hours
@@ -17,8 +17,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install -q duckdb==2.0.0 opening-hours-py==1.2.0
+      - run: pip install -q duckdb==2.0.0 opening-hours-py==1.2.0 exchange_calendars==4.13.3 "pandas==2.3.3"
       - run: python3 -I places/hours.py
+        env:
+          HOURS_OUT: out
+      # Stock exchanges' next 14 days for "Markets now" (world-view docs/MARKETS.md, row 72). pandas 2: the calendars that
+      # follow Orthodox Easter (Athens, Bucharest, Nicosia) fail under pandas 3.
+      - run: python3 -I places/markets.py
         env:
           HOURS_OUT: out
       - name: Publish the hours branch
