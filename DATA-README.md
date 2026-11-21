@@ -15,6 +15,8 @@ they are GDELT's estimate and can be wrong, and an outlet that is not on the lis
 its stories (those an outlet based there carries first, then the most carried), `politics` and `money` its rows of the two topic files. A story is a country's own when
 its first city is there and it names that country most. `tiles/country/index.json` counts each country's stories
 by language.
+`tiles/find/news.json` is the day's most carried stories for the site's news search, one row per headline, each row
+a short list in the order its `row` field gives.
 
 ## wind/
 

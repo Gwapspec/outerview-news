@@ -92,6 +92,13 @@ SHARED_HOSTS = {
     'github.io', 'google.com', 'facebook.com', 'youtube.com', 'yahoo.com', 'msn.com',
 }
 _outlets = None
+# Search the news (world-view docs/NEWS-SEARCH.md, row 75): one file of the day's most carried stories, short, for
+# the site's search. In its own folder, so nothing that reads the tiles folder takes it for a tile.
+FIND_DIR = 'find'
+FIND_OUTLETS = 5  # each row names at most this many outlets, without their links (n still counts them all)
+# One row is a list, in this order (the keys of a tile row would make the file a fifth bigger):
+FIND_ROW = ('t', 'd', 'u', 'ts', 'lg', 'cc', 'pl', 'la', 'lo', 'n', 'ds')
+FIND_MAX = 16000
 # Files in the tiles folder that are not tiles. The Outer Index's two files belong here: without them the tile
 # ageing below removed them on every run (they have no stories), so the index never kept a second day.
 NOT_TILES = ('state.json', 'index.json', 'top.json', 'launches.json', 'money.json', 'politics.json', 'outer-index.json', 'outer-index-history.json')
@@ -499,6 +506,61 @@ def write_countries(out_dir, cutoff):
     return len(counts), sum(sum(c.values()) for c in counts.values())
 
 
+
+def write_find(out_dir, cutoff):
+    """find/news.json: the stories the site's search reads (world-view docs/NEWS-SEARCH.md). Every story two outlets
+    or more carry in the tiles, and every row of the world, politics, money and country lists (those hold a country's
+    own single-outlet stories too), one row per headline, the most carried copy kept. Short: a list per row (FIND_ROW),
+    no image, no topic marks, no outlets' own links, at most FIND_OUTLETS outlets named (2026-11-21: 11,253 rows,
+    3.6 MB, 1.45 MB zipped). All of the day's stories would be four times bigger, too big to read on each search at
+    no cost; a story one outlet carries stays on its place's own page."""
+    best = {}
+
+    def add(s):
+        if not isinstance(s, dict) or not s.get('u') or not s.get('t') or s.get('ts', '') < cutoff:
+            return
+        key = title_key(s['t'])
+        old = best.get(key)
+        if old is None or (s.get('n', 1), s['ts']) > (old.get('n', 1), old['ts']):
+            best[key] = s
+
+    def rows(path, parts):
+        try:
+            with open(path, encoding='utf-8') as f:
+                d = json.load(f)
+            return [s for part in parts for s in (d.get(part) or [])]
+        except Exception:  # noqa: BLE001
+            return []
+
+    for name in os.listdir(out_dir):
+        if name.endswith('.json') and name not in NOT_TILES:
+            for s in rows(os.path.join(out_dir, name), ('s',)):
+                if s.get('n', 1) >= 2:
+                    add(s)
+    for name in ('top.json', 'politics.json', 'money.json'):
+        for s in rows(os.path.join(out_dir, name), ('s',)):
+            add(s)
+    folder = os.path.join(out_dir, COUNTRY_DIR)
+    if os.path.isdir(folder):
+        for name in os.listdir(folder):
+            if name.endswith('.json') and name != 'index.json':
+                for s in rows(os.path.join(folder, name), ('top', 'politics', 'money')):
+                    add(s)
+
+    out = []
+    for s in sorted(best.values(), key=lambda s: (s.get('n', 1), s['ts']), reverse=True)[:FIND_MAX]:
+        n = s.get('n', 1)
+        r = [s['t'], s.get('d', ''), s['u'], s['ts'], s.get('lg', ''), s.get('cc', ''), s.get('pl', ''),
+             round(float(s.get('la') or 0), 3), round(float(s.get('lo') or 0), 3), n]
+        if n > 1 and s.get('ds'):
+            r.append(s['ds'][:FIND_OUTLETS])
+        out.append(r)
+    os.makedirs(os.path.join(out_dir, FIND_DIR), exist_ok=True)
+    with open(os.path.join(out_dir, FIND_DIR, 'news.json'), 'w', encoding='utf-8') as f:
+        json.dump({'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'source': 'GDELT', 'row': FIND_ROW, 's': out}, f, ensure_ascii=False, separators=(',', ':'))
+    return len(out)
+
+
 def main(out_dir):
     os.makedirs(out_dir, exist_ok=True)
     state = load_state(out_dir)
@@ -625,6 +687,10 @@ def main(out_dir):
         print('country files:', countries, '| their stories:', rows)
     except Exception as e:  # noqa: BLE001  (country files are extra too)
         print('country files not written:', e)
+    try:
+        print('search file stories:', write_find(out_dir, cutoff))
+    except Exception as e:  # noqa: BLE001  (the search file is extra too)
+        print('search file not written:', e)
 
 
 if __name__ == '__main__':

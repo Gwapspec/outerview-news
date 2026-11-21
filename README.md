@@ -37,5 +37,9 @@ published on the `data` branch, which is rewritten each run so the repository st
     outlets carry, half the newest. Extra fields: `pg` politics groups, `mc` the country the story names most.
   - Nobody picks the stories and no outlet is rated: the tests read GDELT's marks and nothing else. Country
     codes are GDELT's (FIPS), not ISO: the United Kingdom is `UK`, Germany `GM`, China `CH`.
+- `tiles/find/news.json`, for the site's news search (world-view `docs/NEWS-SEARCH.md`): the day's most carried
+  stories, one row per headline. Every story two outlets or more carry in the tiles, and every row of the world,
+  politics, money and country lists. Each row is a list in the order given by `row` (`t`, `d`, `u`, `ts`, `lg`,
+  `cc`, `pl`, `la`, `lo`, `n`, then `ds` with at most 5 outlets, without their links). About 11,000 rows, 3.6 MB.
 
 Headline and link only, never the article text. Cite GDELT. Code: MIT.
