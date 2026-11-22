@@ -16,7 +16,9 @@ import sys
 import time
 import urllib.request
 import zipfile
+import zlib
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 LISTS = [
     ('https://data.gdeltproject.org/gdeltv2/lastupdate.txt', 'eng'),
@@ -98,12 +100,18 @@ _outlets = None
 # when none is known. Nothing here rates an outlet.
 KINDS_FILE = None  # main sets it from the tiles folder
 _kinds = None
+# Separate links (world-view docs/WHO-CARRIED.md, row 79, module 2): one article that many sites run under the same
+# link path is one link, not many. A row several outlets carried says how many separate links it has (nl), counted
+# over every outlet the job saw: the listed ones by their links, those beyond the list by a short key each (px, at
+# most PX_MAX). Every "most carried" order (top.json, the topic files' covered half, a country's top, the search
+# file) ranks by separate links first, then outlets, then time; top.json takes stories with 3 or more.
+PX_MAX = 300
 # Search the news (world-view docs/NEWS-SEARCH.md, row 75): one file of the day's most carried stories, short, for
 # the site's search. In its own folder, so nothing that reads the tiles folder takes it for a tile.
 FIND_DIR = 'find'
 FIND_OUTLETS = 5  # each row names at most this many outlets, without their links (n still counts them all)
 # One row is a list, in this order (the keys of a tile row would make the file a fifth bigger):
-FIND_ROW = ('t', 'd', 'u', 'ts', 'lg', 'cc', 'pl', 'la', 'lo', 'n', 'ds')
+FIND_ROW = ('t', 'd', 'u', 'ts', 'lg', 'cc', 'pl', 'la', 'lo', 'n', 'nl', 'ds')
 FIND_MAX = 16000
 # Files in the tiles folder that are not tiles. The Outer Index's two files belong here: without them the tile
 # ageing below removed them on every run (they have no stories), so the index never kept a second day.
@@ -162,7 +170,7 @@ def unmerge_once(out_dir, state):
             for s in d.get('s', []):
                 latin = re.sub(r'[^a-z0-9]+', ' ', s['t'].lower()).strip()
                 if 'ds' in s and len(latin) * 2 < len(title_key(s['t'])):
-                    for k in ('n', 'ds', 'us', 'dc', 'dk', 'do'):
+                    for k in ('n', 'ds', 'us', 'dc', 'dk', 'do', 'nl', 'px'):
                         s.pop(k, None)
                     changed += 1
             if changed:
@@ -219,8 +227,39 @@ def outlet_kind(domain):
     return _kinds.get(d[4:] if d.startswith('www.') else d, ('', ''))
 
 
+def link_path(u):
+    """The part of a link that sites running one article share (the app's linkPath): the path without trailing
+    slashes plus the query, in lower case; '' when it is too short to tell an article from a section page."""
+    try:
+        p = urlsplit(u or '')
+    except ValueError:
+        return ''
+    x = (p.path.rstrip('/') + ('?' + p.query if p.query else '')).lower()
+    return x if len(x) > 8 else ''
+
+
+def link_key(url, domain):
+    """A short key for one separate link: its path, or the site itself when the path cannot tell."""
+    return format(zlib.crc32((link_path(url) or 'site:' + (domain or '').lower()).encode('utf-8')), 'x')
+
+
+def separate(s):
+    """How many separate links ran a story: the listed outlets' keys and those beyond the list (px). 1 for a story
+    one outlet carried."""
+    names = s.get('ds') or [s.get('d', '')]
+    urls = s.get('us') or [s.get('u', '')]
+    keys = {link_key(urls[i] if i < len(urls) else '', d) for i, d in enumerate(names)}
+    return len(keys | set(s.get('px') or []))
+
+
+def most_carried(s):
+    """The order of every "most carried" list: separate links, then outlets, then the newest."""
+    return (separate(s), s.get('n', 1), s['ts'])
+
+
 def carry(first, s):
-    """The same headline from another outlet: the first row lists it. n counts outlets, not copies."""
+    """The same headline from another outlet: the first row lists it. n counts outlets, not copies. Past the list,
+    only whether the outlet's link is a new one is kept (px), so separate links see every outlet."""
     names = first.setdefault('ds', [first['d']])
     urls = first.setdefault('us', [first['u']])
     urls += [''] * (len(names) - len(urls))  # a row from before links were kept: those outlets have no link
@@ -230,6 +269,11 @@ def carry(first, s):
     if len(names) < OUTLETS:
         names.append(s['d'])
         urls.append(s['u'])
+        return
+    key = link_key(s['u'], s['d'])
+    px = first.get('px') or []
+    if key not in px and len(px) < PX_MAX and key not in {link_key(u, d) for u, d in zip(urls, names)}:
+        first['px'] = px + [key]
 
 
 def finish(rows):
@@ -247,9 +291,12 @@ def finish(rows):
                     s[key] = vals
                 else:
                     s.pop(key, None)
+            s['nl'] = separate(s)
+            if not s.get('px'):
+                s.pop('px', None)
         else:
-            s.pop('dk', None)
-            s.pop('do', None)
+            for key in ('dk', 'do', 'nl', 'px'):
+                s.pop(key, None)
         codes = [outlet_country(d) for d in names]
         if any(codes):
             s['dc'] = codes
@@ -422,7 +469,7 @@ def write_topic(out_dir, stories, cutoff, name, mark, per_country, total, covere
         old = []
     fresh = [dict(s) for s in stories if s.get(mark)]  # copies: the tile rows keep their own outlet counts
     for s in fresh:
-        for k in ('n', 'ds', 'us', 'dc', 'dk', 'do'):
+        for k in ('n', 'ds', 'us', 'dc', 'dk', 'do', 'nl', 'px'):
             s.pop(k, None)
     seen_url = set()
     by_title = {}
@@ -438,7 +485,7 @@ def write_topic(out_dir, stories, cutoff, name, mark, per_country, total, covere
         by_title[key] = s
         merged.append(s)
     newest = lambda s: s['ts']  # noqa: E731
-    most = lambda s: (s.get('n', 1), s['ts'])  # noqa: E731
+    most = most_carried
     by_country = {}
     for s in merged:
         by_country.setdefault(s.get('mc') or s['cc'], []).append(s)
@@ -501,7 +548,7 @@ def write_countries(out_dir, cutoff):
         except Exception:  # noqa: BLE001
             return []
 
-    most = lambda s: (s.get('n', 1), s['ts'])  # noqa: E731
+    most = most_carried
     best = {}
     for name in os.listdir(out_dir):
         if not name.endswith('.json') or name in NOT_TILES:
@@ -556,7 +603,7 @@ def write_find(out_dir, cutoff):
             return
         key = title_key(s['t'])
         old = best.get(key)
-        if old is None or (s.get('n', 1), s['ts']) > (old.get('n', 1), old['ts']):
+        if old is None or most_carried(s) > most_carried(old):
             best[key] = s
 
     def rows(path, parts):
@@ -583,10 +630,10 @@ def write_find(out_dir, cutoff):
                     add(s)
 
     out = []
-    for s in sorted(best.values(), key=lambda s: (s.get('n', 1), s['ts']), reverse=True)[:FIND_MAX]:
+    for s in sorted(best.values(), key=most_carried, reverse=True)[:FIND_MAX]:
         n = s.get('n', 1)
         r = [s['t'], s.get('d', ''), s['u'], s['ts'], s.get('lg', ''), s.get('cc', ''), s.get('pl', ''),
-             round(float(s.get('la') or 0), 3), round(float(s.get('lo') or 0), 3), n]
+             round(float(s.get('la') or 0), 3), round(float(s.get('lo') or 0), 3), n, separate(s) if n > 1 else 1]
         if n > 1 and s.get('ds'):
             r.append(s['ds'][:FIND_OUTLETS])
         out.append(r)
@@ -680,7 +727,7 @@ def main(out_dir):
         except Exception:  # noqa: BLE001
             pass
 
-    # The world right now: the stories most outlets carried in the last 24 hours, across every tile, with images.
+    # The world right now: the stories with the most separate links in the last 24 hours, across every tile.
     top = []
     for name in os.listdir(out_dir):
         if not name.endswith('.json') or name in NOT_TILES:
@@ -688,13 +735,13 @@ def main(out_dir):
         try:
             with open(os.path.join(out_dir, name), encoding='utf-8') as f:
                 for s in json.load(f).get('s', []):
-                    if s.get('n', 1) >= 3:
+                    if s.get('n', 1) >= 3 and separate(s) >= 3:
                         top.append(s)
         except Exception:  # noqa: BLE001
             pass
     seen_titles = set()
     ranked = []
-    for s in sorted(top, key=lambda s: (s.get('n', 1), s['ts']), reverse=True):
+    for s in sorted(top, key=most_carried, reverse=True):
         key = title_key(s['t'])[:60]
         if key in seen_titles:
             continue

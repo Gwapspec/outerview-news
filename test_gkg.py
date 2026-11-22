@@ -70,7 +70,7 @@ ok(sorted(n_ for n_ in os.listdir(c) if n_.endswith('.json') and n_ not in g.NOT
 # a country's own outlets first
 h = tempfile.mkdtemp()
 json.dump({'s': [row('https://bbc.co.uk/royal', 'A prince speaks about French wildlife at an awards night', mc='FR', n=33, lg='eng'),
-                 row('https://lemonde.fr/calais', 'Calais un salarie meurt apres une chute dans un entrepot', mc='FR', n=9),
+                 row('https://lemonde.fr/calais', 'Calais un salarie meurt apres une chute dans un entrepot', mc='FR', n=9, ds=['lemonde.fr'] + ['o%d.fr' % i for i in range(8)]),
                  row('https://a.fr/x', 'Une histoire sans pays connu pour son site', mc='FR', n=20),
                  row('https://nytimes.com/p', 'Paris court rules on the pension reform appeal', mc='FR', n=3, lg='eng', ds=['nytimes.com', 'lemonde.fr'])]},
           open(os.path.join(h, '40_0.json'), 'w', encoding='utf-8'))
@@ -86,12 +86,13 @@ ok(not g.TOKENISH.search('Philippines: skip_the_queue at Manila airport, AIzawl 
 # the search file (world-view docs/NEWS-SEARCH.md, row 75)
 f = tempfile.mkdtemp()
 json.dump({'s': [row('https://a.com/1', 'Nvidia shares fall', n=3, ds=['a.com', 'b.com', 'c.com']), row('https://a.com/2', 'A cat show in Leeds', n=1)]}, open(os.path.join(f, '50_0.json'), 'w', encoding='utf-8'))
-json.dump({'s': [row('https://z.com/9', 'NVIDIA shares FALL!', n=7), row('https://p.com/1', 'Old story', n=4, ts='20000101000000')]}, open(os.path.join(f, 'politics.json'), 'w', encoding='utf-8'))
+json.dump({'s': [row('https://z.com/9', 'NVIDIA shares FALL!', n=7, ds=['z.com'] + ['s%d.com' % i for i in range(6)]), row('https://p.com/1', 'Old story', n=4, ts='20000101000000')]}, open(os.path.join(f, 'politics.json'), 'w', encoding='utf-8'))
 os.makedirs(os.path.join(f, 'country')); json.dump({'top': [row('https://fr.fr/1', 'Une seule source', n=1)]}, open(os.path.join(f, 'country', 'FR.json'), 'w', encoding='utf-8'))
 ok(g.write_find(f, '20260101000000') == 2, 'search file: one row per headline, two outlets or more from the tiles, every country row, nothing old')
 d = json.load(open(os.path.join(f, 'find', 'news.json'), encoding='utf-8'))
 rows = [dict(zip(d['row'], r)) for r in d['s']]
 ok(rows[0]['u'] == 'https://z.com/9' and rows[0]['n'] == 7 and rows[1]['t'] == 'Une seule source', 'search file: the most carried copy of a headline is kept, the most carried first')
+ok(rows[0]['nl'] == 7 and rows[1]['nl'] == 1, 'search file: separate links beside the outlets (1 for one outlet)')
 ok(os.path.isdir(os.path.join(f, 'find')) and 'find.json' not in os.listdir(f), 'search file: in its own folder, never taken for a tile')
 # kind and owner of each outlet (world-view docs/WHO-CARRIED.md, row 79)
 kf = os.path.join(tempfile.mkdtemp(), 'kinds.tsv')
@@ -110,4 +111,29 @@ own = {'u': 'https://bbc.co.uk/1', 'd': 'bbc.co.uk', 't': 'T', 'n': 2, 'ds': ['b
 g.finish([own])
 ok(own['dk'] == ['tv', ''] and 'do' not in own, 'a kind without an owner: dk only')
 g.KINDS_FILE, g._kinds = None, None
+# separate links (world-view docs/WHO-CARRIED.md, row 79, module 2)
+ok(g.link_path('https://www.a.com/News/National/24745123.story/') == '/news/national/24745123.story' and g.link_path('https://a.com/') == '' and g.link_path('https://a.com/news') == '', 'a link path: no site, no trailing slash, lower case; a section page is none')
+ok(g.link_path('https://a.com/story.php?id=991') == '/story.php?id=991', 'the query is part of the path')
+chain = {'u': 'https://a.co.uk/news/national/24745123.x/', 'd': 'a.co.uk', 't': 'T', 'ts': '20991231000000'}
+for i in range(9):
+    g.carry(chain, {'u': 'https://c%d.co.uk/news/national/24745123.x/' % i, 'd': 'c%d.co.uk' % i})
+g.carry(chain, {'u': 'https://own.com/a-story-of-its-own', 'd': 'own.com'})
+g.carry(chain, {'u': 'https://home.com/', 'd': 'home.com'})
+ok(chain['n'] == 12 and g.separate(chain) == 3, 'one article on 10 sites is one link: 12 outlets, 3 separate links (a home page counts as its site)')
+big = {'u': 'https://a.com/one/article/1', 'd': 'a.com', 't': 'T', 'ts': '20991231000000'}
+for i in range(1, g.OUTLETS):
+    g.carry(big, {'u': 'https://x%d.com/one/article/1' % i, 'd': 'x%d.com' % i})
+for i in range(30):
+    g.carry(big, {'u': 'https://y%d.com/one/article/1' % i, 'd': 'y%d.com' % i})
+ok(big['n'] == 70 and g.separate(big) == 1 and 'px' not in big, 'past the list, a copy of a listed article adds no link')
+for i in range(5):
+    g.carry(big, {'u': 'https://z%d.com/own-story-%d' % (i, i), 'd': 'z%d.com' % i})
+g.carry(big, {'u': 'https://z9.com/own-story-0', 'd': 'z9.com'})
+ok(big['n'] == 76 and g.separate(big) == 6 and len(big['px']) == 5, 'past the list, new links are counted once each')
+g.finish([big])
+ok(big['nl'] == 6 and len(big['px']) == 5, 'finish writes nl and keeps px')
+solo = {'u': 'https://a.com/x/y/z/1', 'd': 'a.com', 't': 'T', 'nl': 4, 'px': ['ab']}
+g.finish([solo])
+ok('nl' not in solo and 'px' not in solo and g.separate(solo) == 1, 'a story one outlet carried has no nl and counts 1')
+ok(g.most_carried({'n': 155, 'ts': '1', 'ds': ['a', 'b'], 'us': ['https://a/same/path/1', 'https://b/same/path/1']}) < g.most_carried({'n': 3, 'ts': '0', 'ds': ['a', 'b', 'c'], 'us': ['https://a/p/one-1', 'https://b/p/two-2', 'https://c/p/three-3']}), 'three separate links outrank one article on 155 sites')
 print('all good')

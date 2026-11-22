@@ -11,7 +11,9 @@ A story several outlets carried is one row that lists them: `ds` the outlets, `u
 country each is based in. The countries come from the GDELT Project's list of news outlets by country (May 2018);
 they are GDELT's estimate and can be wrong, and an outlet that is not on the list has none. `dk` and `do`, in the same
 order, are each outlet's kind (`agency`, `tv`, `radio`, `paper`, `mag`, `web`) and owner where Wikidata says, `''` where
-it does not; each is left off when none is known.
+it does not; each is left off when none is known. `nl` is how many separate links ran the story: sites that run one
+article under the same link path count once (`px` keeps a short key for each new link past the 40 listed). Every
+"most carried" order here (top.json, the topic files, a country's top, the search file) ranks by `nl`, then `n`.
 
 `outlets/kinds.tsv` is what Wikidata said about each news site (CC0): its kind, its owner (owned by, else parent
 organization, a current statement only, and only when Wikidata names one), its item and the day it was asked. A site
