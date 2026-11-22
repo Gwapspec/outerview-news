@@ -93,4 +93,21 @@ d = json.load(open(os.path.join(f, 'find', 'news.json'), encoding='utf-8'))
 rows = [dict(zip(d['row'], r)) for r in d['s']]
 ok(rows[0]['u'] == 'https://z.com/9' and rows[0]['n'] == 7 and rows[1]['t'] == 'Une seule source', 'search file: the most carried copy of a headline is kept, the most carried first')
 ok(os.path.isdir(os.path.join(f, 'find')) and 'find.json' not in os.listdir(f), 'search file: in its own folder, never taken for a tile')
+# kind and owner of each outlet (world-view docs/WHO-CARRIED.md, row 79)
+kf = os.path.join(tempfile.mkdtemp(), 'kinds.tsv')
+open(kf, 'w', encoding='utf-8').write('# site\tkind\towner\titem\tday\nlemonde.fr\tpaper\tGroupe Le Monde\tQ12461\t2026-11-22\nbbc.co.uk\ttv\t\tQ9531\t2026-11-22\nunknown.org\t\t\t\t2026-11-22\n')
+g.KINDS_FILE, g._kinds = kf, None
+r = {'u': 'https://lemonde.fr/1', 'd': 'lemonde.fr', 't': 'T', 'n': 3, 'ds': ['lemonde.fr', 'www.bbc.co.uk', 'x.com'], 'us': ['https://lemonde.fr/1', 'https://bbc.co.uk/2', 'https://x.com/3']}
+g.finish([r])
+ok(r['dk'] == ['paper', 'tv', ''] and r['do'] == ['Groupe Le Monde', '', ''], 'kind and owner in step with names; www. does not matter; unknown is empty')
+one = {'u': 'https://lemonde.fr/1', 'd': 'lemonde.fr', 't': 'T', 'dk': ['paper'], 'do': ['Groupe Le Monde']}
+g.finish([one])
+ok('dk' not in one and 'do' not in one, 'a row one outlet carried has no kind lists')
+nob = {'u': 'https://x.com/1', 'd': 'x.com', 't': 'T', 'n': 2, 'ds': ['x.com', 'unknown.org'], 'us': ['https://x.com/1', 'https://unknown.org/1'], 'dk': ['tv', '']}
+g.finish([nob])
+ok('dk' not in nob and 'do' not in nob, 'no kind known: both lists left off, an old one removed')
+own = {'u': 'https://bbc.co.uk/1', 'd': 'bbc.co.uk', 't': 'T', 'n': 2, 'ds': ['bbc.co.uk', 'x.com'], 'us': ['https://bbc.co.uk/1', 'https://x.com/1']}
+g.finish([own])
+ok(own['dk'] == ['tv', ''] and 'do' not in own, 'a kind without an owner: dk only')
+g.KINDS_FILE, g._kinds = None, None
 print('all good')

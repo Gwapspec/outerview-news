@@ -92,6 +92,12 @@ SHARED_HOSTS = {
     'github.io', 'google.com', 'facebook.com', 'youtube.com', 'yahoo.com', 'msn.com',
 }
 _outlets = None
+# Kind and owner of each outlet (world-view docs/WHO-CARRIED.md, row 79): kinds.py keeps Wikidata's answers in
+# outlets/kinds.tsv beside the tiles folder. A row several outlets carried lists each one's kind (dk: agency, tv,
+# radio, paper, mag, web) and owner (do), in step with ds, '' where Wikidata does not say; each list is left off
+# when none is known. Nothing here rates an outlet.
+KINDS_FILE = None  # main sets it from the tiles folder
+_kinds = None
 # Search the news (world-view docs/NEWS-SEARCH.md, row 75): one file of the day's most carried stories, short, for
 # the site's search. In its own folder, so nothing that reads the tiles folder takes it for a tile.
 FIND_DIR = 'find'
@@ -156,7 +162,7 @@ def unmerge_once(out_dir, state):
             for s in d.get('s', []):
                 latin = re.sub(r'[^a-z0-9]+', ' ', s['t'].lower()).strip()
                 if 'ds' in s and len(latin) * 2 < len(title_key(s['t'])):
-                    for k in ('n', 'ds', 'us', 'dc'):
+                    for k in ('n', 'ds', 'us', 'dc', 'dk', 'do'):
                         s.pop(k, None)
                     changed += 1
             if changed:
@@ -195,6 +201,24 @@ def outlet_country(domain):
     return ''
 
 
+def outlet_kind(domain):
+    """(kind, owner) for a news site from Wikidata, by kinds.py; ('', '') when not known. The site itself only."""
+    global _kinds
+    if _kinds is None:
+        _kinds = {}
+        if KINDS_FILE:
+            try:
+                with open(KINDS_FILE, encoding='utf-8') as f:
+                    for line in f:
+                        p = line.rstrip('\n').split('\t')
+                        if len(p) == 5 and not line.startswith('#'):
+                            _kinds[p[0]] = (p[1], p[2])
+            except OSError as e:
+                print('no outlet kinds yet:', e)
+    d = (domain or '').strip().lower()
+    return _kinds.get(d[4:] if d.startswith('www.') else d, ('', ''))
+
+
 def carry(first, s):
     """The same headline from another outlet: the first row lists it. n counts outlets, not copies."""
     names = first.setdefault('ds', [first['d']])
@@ -209,12 +233,23 @@ def carry(first, s):
 
 
 def finish(rows):
-    """Before a file is written: each outlet's country (dc, left off when none is known), links in step with names."""
+    """Before a file is written: each outlet's country (dc, left off when none is known), links in step with names,
+    and on a row several outlets carried each one's kind and owner (dk, do, each left off when none is known)."""
     for s in rows:
         names = s.get('ds') or [s['d']]
         if 'ds' in s:
             urls = s.get('us') or [s['u']]
             s['us'] = (urls + [''] * len(names))[:len(names)]
+            known = [outlet_kind(d) for d in names]
+            for key, i in (('dk', 0), ('do', 1)):
+                vals = [k[i] for k in known]
+                if any(vals):
+                    s[key] = vals
+                else:
+                    s.pop(key, None)
+        else:
+            s.pop('dk', None)
+            s.pop('do', None)
         codes = [outlet_country(d) for d in names]
         if any(codes):
             s['dc'] = codes
@@ -387,7 +422,7 @@ def write_topic(out_dir, stories, cutoff, name, mark, per_country, total, covere
         old = []
     fresh = [dict(s) for s in stories if s.get(mark)]  # copies: the tile rows keep their own outlet counts
     for s in fresh:
-        for k in ('n', 'ds', 'us', 'dc'):
+        for k in ('n', 'ds', 'us', 'dc', 'dk', 'do'):
             s.pop(k, None)
     seen_url = set()
     by_title = {}
@@ -562,7 +597,9 @@ def write_find(out_dir, cutoff):
 
 
 def main(out_dir):
+    global KINDS_FILE
     os.makedirs(out_dir, exist_ok=True)
+    KINDS_FILE = os.path.join(os.path.dirname(os.path.abspath(out_dir)), 'outlets', 'kinds.tsv')
     state = load_state(out_dir)
     unmerge_once(out_dir, state)
     done = set(state['done'])

@@ -1,0 +1,46 @@
+"""kinds.py's rules on made-up answers, no network: python3 -I test_kinds.py (exit 1 on the first failure)."""
+import importlib.util, json, os, sys, tempfile
+from datetime import date
+spec = importlib.util.spec_from_file_location('kinds', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kinds.py'))
+k = importlib.util.module_from_spec(spec); spec.loader.exec_module(k)
+ok = lambda c, m: print(('ok   ' if c else 'FAIL ') + m) or (c or sys.exit(1))
+# kinds: the first match in order wins; anything else is no kind
+ok(k.kind_of({'television station', 'company'}) == 'tv', 'a television station is TV')
+ok(k.kind_of({'radio station'}) == 'radio', 'a radio station is radio')
+ok(k.kind_of({'daily newspaper', 'website'}) == 'paper', 'a newspaper with a website is a newspaper')
+ok(k.kind_of({'news agency', 'newspaper'}) == 'agency', 'a news agency first')
+ok(k.kind_of({'periodical'}) == '', 'a periodical is no kind (some local weeklies are called that)')
+ok(k.kind_of({'magazine'}) == 'mag' and k.kind_of({'news website'}) == 'web', 'magazine and online')
+ok(k.kind_of(set()) == '' and k.kind_of({'business', 'media company'}) == '', 'a company or nothing is no kind')
+# owners: owned by before parent organization, preferred before normal, one name or none
+ok(k.pick_owner([('P749', False, 'Parent Co'), ('P127', False, 'Owner Co')]) == 'Owner Co', 'owned by before parent organization')
+ok(k.pick_owner([('P127', False, 'Old Co'), ('P127', True, 'New Co')]) == 'New Co', 'a preferred statement first')
+ok(k.pick_owner([('P127', False, 'A Radio'), ('P127', False, 'B Radio')]) == '', 'two owners left: no owner named')
+ok(k.pick_owner([('P127', False, 'Same Co'), ('P127', False, 'Same Co')]) == 'Same Co', 'the same owner twice is one')
+ok(k.pick_owner([('P127', False, 'Q12345')]) == '' and k.pick_owner([]) == '', 'an owner with no English name is none')
+ok(k.pick_owner([('P749', False, 'Tab\tCo')]) == 'Tab Co', 'no tab reaches the file')
+# addresses
+ok(len(k.spellings('a.com')) == 8 and 'https://www.a.com/' in k.spellings('a.com') and 'http://a.com' in k.spellings('a.com'), 'eight spellings of a site')
+ok(k.host_of('https://www.Example.co.uk/') == 'example.co.uk', 'www. is not part of the site')
+# when to ask again
+today = date(2026, 11, 22)
+ok(not k.due(('', '', '', '2026-11-01'), today) and k.due(('', '', '', '2026-10-20'), today), 'an unknown site is asked again after 30 days')
+ok(not k.due(('paper', 'X', 'Q1', '2026-10-01'), today) and k.due(('paper', 'X', 'Q1', '2026-09-20'), today), 'a known site after 60 days')
+ok(k.due(('', '', '', 'garbage'), today), 'a day that cannot be read is asked again')
+# the sites a run asks about: rows several outlets carried, most seen first; the file round trip
+d = tempfile.mkdtemp()
+tiles = os.path.join(d, 'tiles')
+os.makedirs(tiles)
+json.dump({'s': [{'d': 'a.com', 'ds': ['a.com', 'www.b.com']}, {'d': 'b.com', 'ds': ['b.com', 'c.com']}, {'d': 'solo.com'}, {'d': 'x', 'ds': ['not a site', 'b.com']}]}, open(os.path.join(tiles, '0_0.json'), 'w'))
+json.dump({'done': ['x']}, open(os.path.join(tiles, 'state.json'), 'w'))
+seen = k.sites_in(tiles)
+ok(seen == {'a.com': 1, 'b.com': 3, 'c.com': 1}, 'sites on rows several outlets carried, counted per row; a one-outlet row and a bad name are not')
+path = os.path.join(d, 'outlets', 'kinds.tsv')
+k.save(path, {'b.com': ('paper', 'B Co', 'Q2', '2026-11-22'), 'a.com': ('', '', '', '2026-11-22')})
+ok(k.load(path) == {'a.com': ('', '', '', '2026-11-22'), 'b.com': ('paper', 'B Co', 'Q2', '2026-11-22')}, 'the file reads back as written')
+# a run with nothing new asks nothing (no network here: lookup would fail the test)
+k.lookup = lambda sites, deadline: (_ for _ in ()).throw(AssertionError('asked'))
+k.save(path, {s: ('', '', '', date.today().isoformat()) for s in seen})
+k.main(tiles)
+ok(set(k.load(path)) == set(seen), 'nothing new: nothing asked, nothing lost')
+print('all good')

@@ -22,6 +22,12 @@ jobs:
         run: |
           git clone --depth 1 --branch data "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" out || mkdir -p out
           mkdir -p out/tiles
+      # Kind and owner of each outlet, from Wikidata (world-view docs/WHO-CARRIED.md, row 79): only sites not asked about
+      # yet, the most seen first, at most 600 a run; kept in out/outlets/kinds.tsv, which the tiles step reads.
+      - name: Outlet kinds and owners (Wikidata)
+        run: python3 -I kinds.py out/tiles
+        timeout-minutes: 3
+        continue-on-error: true
       - name: Build the tiles
         run: python3 -I gkg.py out/tiles
       - name: The Outer Index (one number per city for today)

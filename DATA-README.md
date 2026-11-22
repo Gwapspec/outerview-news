@@ -9,7 +9,13 @@ world, chosen by GDELT's topic marks (the rules are in the `main` branch's READM
 
 A story several outlets carried is one row that lists them: `ds` the outlets, `us` each one's own link, `dc` the
 country each is based in. The countries come from the GDELT Project's list of news outlets by country (May 2018);
-they are GDELT's estimate and can be wrong, and an outlet that is not on the list has none.
+they are GDELT's estimate and can be wrong, and an outlet that is not on the list has none. `dk` and `do`, in the same
+order, are each outlet's kind (`agency`, `tv`, `radio`, `paper`, `mag`, `web`) and owner where Wikidata says, `''` where
+it does not; each is left off when none is known.
+
+`outlets/kinds.tsv` is what Wikidata said about each news site (CC0): its kind, its owner (owned by, else parent
+organization, a current statement only, and only when Wikidata names one), its item and the day it was asked. A site
+Wikidata does not know is kept with no item and asked again after 30 days. Nothing here rates an outlet.
 
 `tiles/country/<cc>.json` is one country's news at home in the last 24 hours (`cc` is GDELT's FIPS country code): `top`
 its stories (those an outlet based there carries first, then the most carried), `politics` and `money` its rows of the two topic files. A story is a country's own when

@@ -18,6 +18,9 @@ published on the `data` branch, which is rewritten each run so the repository st
 - `outlet-countries.tsv`: where each news site is based (site, GDELT country code), trimmed from the GDELT
   Project's list of news outlets by country (May 2018 update). It is GDELT's estimate, from the places each site
   wrote about most. It is old and it can be wrong; a site that is not on it has no country.
+- `kinds.py`: each news site's kind and owner from Wikidata (CC0; world-view docs/WHO-CARRIED.md), run before the
+  tiles; it asks only about sites it has not asked about and keeps the answers in `outlets/kinds.tsv` on the data
+  branch. `test_kinds.py`: its rules, no network.
 - `.github/workflows/news.yml`: the schedule.
 - Data: `https://raw.githubusercontent.com/Gwapspec/outerview-news/data/tiles/<lat10>_<lng10>.json`
   (`index.json` lists the tiles). Fields: `u` url, `d` outlet domain, `t` title, `la`/`lo` location, `pl` place
