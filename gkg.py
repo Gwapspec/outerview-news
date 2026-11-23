@@ -505,6 +505,9 @@ def parse(zip_bytes, default_lang):
                     row['pm'] = loc['pm']  # the pin's mentions in the text
                 if loc.get('ph'):
                     row['ph'] = 1  # the headline names the pin
+                oc = outlet_country(cols[3])
+                if oc:
+                    row['oc'] = oc  # the outlet's own country (FIPS): a place shows its home press, or what names it
                 if TOKENISH.search(row['u']) or TOKENISH.search(row['t']) or TOKENISH.search(row['im']):
                     continue
                 groups = money_groups(cols[7])
