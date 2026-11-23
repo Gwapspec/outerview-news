@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 import urllib.request
 import zipfile
 import zlib
@@ -362,9 +363,39 @@ def tidy(s):
     return s
 
 
-def best_location(field):
-    """V2Locations: Type#Name#CC#ADM1#ADM2#Lat#Lng#FeatureID#Offset;... Prefer the first city (3, 4), else any."""
-    first = None
+def _fold(s):
+    """Lower case without accents, for matching place names."""
+    return ''.join(ch for ch in unicodedata.normalize('NFD', (s or '').lower()) if unicodedata.category(ch) != 'Mn')
+
+
+def _known_cities():
+    """The names of our 3,872 cities by ISO country (cities.json); GDELT's FIPS codes map to ISO through fips.json
+    (made from the app's countryCodes.ts, itself from GeoNames countryInfo.txt, CC BY 4.0)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(here, 'cities.json'), encoding='utf-8') as f:
+            cities = json.load(f)['cities']
+        with open(os.path.join(here, 'fips.json'), encoding='utf-8') as f:
+            fips = json.load(f)
+    except Exception:  # noqa: BLE001
+        return set(), {}
+    return {(_fold(c[1]), c[2]) for c in cities}, fips
+
+
+KNOWN_CITIES, FIPS_ISO = _known_cities()
+PIN_KEEP = 5  # a city is the pin from this score
+
+
+def best_location(field, title=''):
+    """V2Locations: Type#Name#CC#ADM1#ADM2#Lat#Lng#FeatureID#Offset;... (every mention). A city (type 3 or 4) is the
+    pin when the evidence for it scores PIN_KEEP: the headline names it (4), it is one of our 3,872 cities (3), each
+    mention (2, up to three), mentioned early (2 in the first 300 characters, 1 in the first 1,000). GDELT resolves an
+    ambiguous name by its own rules ("Três Lagoas" to a hamlet in Pará, "Kanagawa" to a village in Fukushima), and
+    until 2026-11-23 the first city named was the pin, so Castanhal's Board carried São Bernardo do Campo (world-view
+    docs/CORE-PASS.md). A weak city falls back to the country named most (type 1), else a state (2, 5), else the first
+    location of any kind. A city pin carries pm (its mentions) and ph (1 when the headline names it)."""
+    groups = {}
+    order = []
     for loc in field.split(';'):
         p = loc.split('#')
         if len(p) < 7:
@@ -375,12 +406,43 @@ def best_location(field):
             continue
         if not (-90 <= lat <= 90 and -180 <= lng <= 180) or (lat == 0 and lng == 0):
             continue
-        rec = {'name': p[1], 'cc': p[2], 'lat': round(lat, 3), 'lng': round(lng, 3), 'type': p[0]}
-        if p[0] in ('3', '4'):
-            return rec
-        if first is None:
-            first = rec
-    return first
+        try:
+            off = int(p[8]) if len(p) > 8 and p[8] else 10**6
+        except ValueError:
+            off = 10**6
+        key = (p[7] if len(p) > 7 and p[7] else p[1], p[2])
+        g = groups.get(key)
+        if g is None:
+            g = groups[key] = {'rec': {'name': p[1], 'cc': p[2], 'lat': round(lat, 3), 'lng': round(lng, 3), 'type': p[0]}, 'n': 0, 'off': off}
+            order.append(g)
+        g['n'] += 1
+        g['off'] = min(g['off'], off)
+    if not order:
+        return None
+    t = _fold(title)
+    best, best_score = None, -1
+    for g in order:
+        rec = g['rec']
+        if rec['type'] not in ('3', '4'):
+            continue
+        name = _fold(rec['name'].split(',')[0])
+        named = len(name) >= 3 and name in t
+        score = (4 if named else 0) + (3 if (name, FIPS_ISO.get(rec['cc'], rec['cc'])) in KNOWN_CITIES else 0) + min(g['n'], 3) * 2 + (2 if g['off'] < 300 else 1 if g['off'] < 1000 else 0)
+        if score > best_score:
+            best, best_score = (g, named), score
+    if best and best_score >= PIN_KEEP:
+        g, named = best
+        return dict(g['rec'], pm=min(g['n'], 9), ph=1 if named else 0)
+    count = {}
+    for g in order:
+        if g['rec']['cc']:
+            count[g['rec']['cc']] = count.get(g['rec']['cc'], 0) + g['n']
+    main = max(count, key=count.get) if count else ''
+    for want in (('1',), ('2', '5')):
+        for g in order:
+            if g['rec']['type'] in want and g['rec']['cc'] == main:
+                return dict(g['rec'])
+    return dict(order[0]['rec'])
 
 
 def main_country(field):
@@ -413,7 +475,7 @@ def parse(zip_bytes, default_lang):
                 title = tidy(m.group(1))
                 if len(title) < 12 or BAD_TITLE.match(title):
                     continue
-                loc = best_location(cols[10])
+                loc = best_location(cols[10], title)
                 if not loc:
                     continue
                 lang = default_lang
@@ -439,6 +501,10 @@ def parse(zip_bytes, default_lang):
                     'im': cols[18][:300] if cols[18] else '',
                     'tn': tone,
                 }
+                if loc.get('pm'):
+                    row['pm'] = loc['pm']  # the pin's mentions in the text
+                if loc.get('ph'):
+                    row['ph'] = 1  # the headline names the pin
                 if TOKENISH.search(row['u']) or TOKENISH.search(row['t']) or TOKENISH.search(row['im']):
                     continue
                 groups = money_groups(cols[7])
