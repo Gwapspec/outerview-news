@@ -10,6 +10,7 @@ Usage: python3 gkg.py <out_dir>   (merges into the files already in out_dir)
 import html
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -378,12 +379,23 @@ def _known_cities():
         with open(os.path.join(here, 'fips.json'), encoding='utf-8') as f:
             fips = json.load(f)
     except Exception:  # noqa: BLE001
-        return set(), {}
-    return {(_fold(c[1]), c[2]) for c in cities}, fips
+        return {}, {}, {}
+    by_name, by_iso = {}, {}
+    for c in cities:
+        by_name.setdefault((_fold(c[1]), c[2]), []).append((c[1], c[3], c[4]))
+        by_iso.setdefault(c[2], []).append((_fold(c[1]), c[1], c[3], c[4]))
+    return by_name, by_iso, fips
 
 
-KNOWN_CITIES, FIPS_ISO = _known_cities()
+KNOWN_CITIES, CITIES_BY_ISO, FIPS_ISO = _known_cities()
+ISO_FIPS = {v: k for k, v in FIPS_ISO.items()}
 PIN_KEEP = 5  # a city is the pin from this score
+NAMESAKE_KM = 100  # a place with one of our cities' names farther than this from it is a namesake, not that city
+
+
+def _km(lat1, lng1, lat2, lng2):
+    a = math.sin(math.radians(lat2 - lat1) / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(math.radians(lng2 - lng1) / 2) ** 2
+    return 2 * 6371 * math.asin(math.sqrt(a))
 
 
 def best_location(field, title=''):
@@ -393,7 +405,11 @@ def best_location(field, title=''):
     ambiguous name by its own rules ("Três Lagoas" to a hamlet in Pará, "Kanagawa" to a village in Fukushima), and
     until 2026-11-23 the first city named was the pin, so Castanhal's Board carried São Bernardo do Campo (world-view
     docs/CORE-PASS.md). A weak city falls back to the country named most (type 1), else a state (2, 5), else the first
-    location of any kind. A city pin carries pm (its mentions) and ph (1 when the headline names it)."""
+    location of any kind. A city pin carries pm (its mentions) and ph (1 when the headline names it).
+    Since 2026-11-24 "one of our cities" means within NAMESAKE_KM of it: GDELT's namesake of one of ours (a "Santarém"
+    on the coast, "Sao Bernardo" in Pará for São Bernardo do Campo) earns nothing and is not "named" when the headline
+    names a longer place it is part of; when ours is the only city of that name in its country and no city the text
+    lists is near it, ours is the pin, at its own coordinates."""
     groups = {}
     order = []
     for loc in field.split(';'):
@@ -420,16 +436,44 @@ def best_location(field, title=''):
     if not order:
         return None
     t = _fold(title)
+    # Our cities the headline names, in the countries the text names.
+    isos = {FIPS_ISO.get(g['rec']['cc'], g['rec']['cc']) for g in order if g['rec']['cc']}
+    ours_named = {}  # folded name -> [(name as written, lat, lng, iso)]
+    for iso in isos:
+        for n, name, la, lo in CITIES_BY_ISO.get(iso, ()):
+            if len(n) >= 4 and n in t:
+                ours_named.setdefault(n, []).append((name, la, lo, iso))
+    cities = [g for g in order if g['rec']['type'] in ('3', '4')]
     best, best_score = None, -1
-    for g in order:
-        rec = g['rec']
-        if rec['type'] not in ('3', '4'):
-            continue
-        name = _fold(rec['name'].split(',')[0])
-        named = len(name) >= 3 and name in t
-        score = (4 if named else 0) + (3 if (name, FIPS_ISO.get(rec['cc'], rec['cc'])) in KNOWN_CITIES else 0) + min(g['n'], 3) * 2 + (2 if g['off'] < 300 else 1 if g['off'] < 1000 else 0)
+
+    def consider(g, named, ours):
+        nonlocal best, best_score
+        score = (4 if named else 0) + (3 if ours else 0) + min(g['n'], 3) * 2 + (2 if g['off'] < 300 else 1 if g['off'] < 1000 else 0)
         if score > best_score:
             best, best_score = (g, named), score
+
+    for g in cities:
+        rec = g['rec']
+        name = _fold(rec['name'].split(',')[0])
+        iso = FIPS_ISO.get(rec['cc'], rec['cc'])
+        ours = any(_km(rec['lat'], rec['lng'], la, lo) <= NAMESAKE_KM for _, la, lo in KNOWN_CITIES.get((name, iso), ()))
+        # The headline names a longer place this name is part of ("Sao Bernardo" in "São Bernardo do Campo"): not this one.
+        longer = any(o != name and name in o for o in ours_named)
+        named = len(name) >= 3 and name in t and not longer
+        consider(g, named, ours)
+    # GDELT put one of our cities' names somewhere else (a namesake, or a shorter name): our city is the pin when it is
+    # the only one of that name in its country and no city the text lists is near it.
+    for n, places in ours_named.items():
+        if len(places) != 1:
+            continue
+        name, la, lo, iso = places[0]
+        if any(_km(g['rec']['lat'], g['rec']['lng'], la, lo) <= NAMESAKE_KM for g in cities):
+            continue
+        like = [g for g in cities if FIPS_ISO.get(g['rec']['cc'], g['rec']['cc']) == iso and _fold(g['rec']['name'].split(',')[0]) in n]
+        if not like:
+            continue
+        src = max(like, key=lambda g: g['n'])
+        consider({'rec': {'name': name, 'cc': ISO_FIPS.get(iso, iso), 'lat': la, 'lng': lo, 'type': '4'}, 'n': src['n'], 'off': src['off']}, True, True)
     if best and best_score >= PIN_KEEP:
         g, named = best
         return dict(g['rec'], pm=min(g['n'], 9), ph=1 if named else 0)
