@@ -28,8 +28,17 @@ jobs:
         run: python3 -I kinds.py out/tiles
         timeout-minutes: 3
         continue-on-error: true
+      # The listed companies and their head offices, from Wikidata, once a week (world-view docs/COMPANY-NEWS.md, row 80):
+      # kept in out/companies/list.json; the tiles step marks the stories that name one.
+      - name: Listed companies (Wikidata, weekly)
+        run: python3 -I companies.py refresh out/companies
+        timeout-minutes: 4
+        continue-on-error: true
       - name: Build the tiles
         run: python3 -I gkg.py out/tiles
+      - name: Companies in the news today
+        run: python3 -I companies.py today out/tiles
+        continue-on-error: true
       - name: The Outer Index (one number per city for today)
         run: python3 -I index.py out/tiles cities.json
         continue-on-error: true

@@ -26,6 +26,15 @@ by language.
 `tiles/find/news.json` is the day's most carried stories for the site's news search, one row per headline, each row
 a short list in the order its `row` field gives.
 
+`companies/list.json` is the listed companies with a head office, from Wikidata (CC0), read once a week: listed on an
+exchange, a head office with a point, known in 20 or more Wikipedia languages, not closed or replaced. Each: `id`
+(Wikidata), `name`, `alts` (other names), `cc` (ISO country of the head office), `hq` (its place), `la`, `lo`, `ex`
+(the exchange, a home one first), `tk` (ticker), `links`. `tiles/companies.json` is the companies a story of the last
+24 hours names, the most carried first: a company is named when its name is in the headline and among GDELT's
+organizations for the story (the rules are in `companies.py`); each carries its stories (`s`, slim rows, eight at
+most), `n` stories and `nl` the most separate links one of them has. A tile row that names a company carries `co`,
+the companies' ids.
+
 ## wind/
 
 The wind for OuterView's Wind layer (world-view `docs/WIND.md`), from NOAA's GFS model (public domain), refreshed when

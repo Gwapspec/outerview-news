@@ -12,6 +12,10 @@ import io
 import json
 import math
 import os
+import sys as _sys
+
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python3 -I` leaves the script's folder off the path
+import companies  # noqa: E402  (world-view docs/COMPANY-NEWS.md, row 80: the companies a headline names)
 import re
 import sys
 import time
@@ -265,6 +269,8 @@ def carry(first, s):
     names = first.setdefault('ds', [first['d']])
     urls = first.setdefault('us', [first['u']])
     urls += [''] * (len(names) - len(urls))  # a row from before links were kept: those outlets have no link
+    if s.get('co') and set(s['co']) - set(first.get('co') or []):
+        first['co'] = sorted(set(first.get('co') or []) | set(s['co']))[:3]  # a copy read after the list was: the companies stay
     if s['d'] in names:
         return
     first['n'] = first.get('n', 1) + 1
@@ -563,6 +569,10 @@ def parse(zip_bytes, default_lang):
                 # Every row carries the country it names most, so "news from a country" can leave out a story that
                 # only opens there (country/<cc>.json). Money and politics news have needed it from the start.
                 row['mc'] = main_country(cols[10]) or loc['cc']
+                # The listed companies the headline names (companies.py; world-view docs/COMPANY-NEWS.md, row 80).
+                co = companies.match(title, cols[13], cols[11], cols[10])
+                if co:
+                    row['co'] = co
                 out.append(row)
     return out
 
@@ -760,6 +770,7 @@ def main(out_dir):
     global KINDS_FILE
     os.makedirs(out_dir, exist_ok=True)
     KINDS_FILE = os.path.join(os.path.dirname(os.path.abspath(out_dir)), 'outlets', 'kinds.tsv')
+    print('listed companies known:', companies.load_list(os.path.join(os.path.dirname(os.path.abspath(out_dir)), 'companies', 'list.json')))
     state = load_state(out_dir)
     unmerge_once(out_dir, state)
     done = set(state['done'])
